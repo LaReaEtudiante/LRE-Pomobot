@@ -1,20 +1,21 @@
 from tinydb import TinyDB, Query
 
-# On crée la base de données dans un fichier JSON
-db = TinyDB('db.json')
 User = Query()
 
 
-def ajouter_temps(user_id: int, temps: int):
-    """Ajoute du temps de travail pour un utilisateur"""
-    utilisateur = db.get(User.user_id == user_id)
+def ajouter_temps(user_id: int, guild_id: int, temps: int):
+    """Ajoute du temps de travail pour un utilisateur dans un serveur"""
+    db = TinyDB('leaderboard.json')
+    table = db.table(str(guild_id))
+
+    utilisateur = table.get(User.user_id == user_id)
     if utilisateur:
         # Mise à jour si déjà existant
-        nouveau_temps = utilisateur['temps'] + temps
-        db.update({'temps': nouveau_temps}, User.user_id == user_id)
+        nouveau_temps = utilisateur['minutes'] + temps
+        table.update({'minutes': nouveau_temps}, User.user_id == user_id)
     else:
         # Sinon créer un nouvel enregistrement
-        db.insert({'user_id': user_id, 'temps': temps})
+        table.insert({'user_id': user_id, 'minutes': temps})
 
 
 def recuperer_temps(user_id: int, guild_id: int):
@@ -28,7 +29,8 @@ def recuperer_temps(user_id: int, guild_id: int):
         return 0
 
 
-def classement_top10(guild_id):
+def classement_top10(guild_id: int):
+    """Récupère le top 10 des utilisateurs par temps de travail"""
     db = TinyDB('leaderboard.json')
     table = db.table(str(guild_id))
 

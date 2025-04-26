@@ -268,7 +268,6 @@ async def reset_settings(ctx):
 
 @bot.command(name='help', help='Décrit toutes les commandes du bot.')
 async def help(ctx):
-    # TODO: Fill in help command
     help_commands = dict()  # Dict of help commands + their description
     for command in bot.commands:
         help_commands[command.name] = command.help
@@ -276,11 +275,17 @@ async def help(ctx):
     desc = 'Le préfixe pour ce bot est `' + COMMAND_PREFIX + '`\n'  # Prints ordered list of timer commands
     desc += f'\n**Commandes du minuteur | {len(TIMER_COMMANDS)}**\n'
     for command in TIMER_COMMANDS:
-        desc += '`{:12s}` {}\n'.format(command, help_commands[command])
+        desc += '`{:12s}` {}\n'.format(command, help_commands.get(command, ''))
 
     desc += f'\n**Commandes générales | {len(GENERAL_COMMANDS)}**\n'  # Prints ordered list of general commands
     for command in GENERAL_COMMANDS:
-        desc += '`{:12s}` {}\n'.format(command, help_commands[command])
+        desc += '`{:12s}` {}\n'.format(command, help_commands.get(command, ''))
+
+    # ➔ Ici on ajoute le leaderboard
+    desc += '\n**Autres Commandes**\n'
+    desc += '`{:12s}` {}\n'.format(
+        'leaderboard',
+        help_commands.get('leaderboard', 'Affiche le classement du serveur'))
 
     em = discord.Embed(title='Commandes du Bot',
                        description=desc,
