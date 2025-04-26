@@ -26,8 +26,11 @@ def recuperer_temps(user_id: int):
         return 0
 
 
-def classement_top10():
-    """Retourne le top 10 des utilisateurs par temps travaillé"""
-    utilisateurs = db.all()
-    utilisateurs = sorted(utilisateurs, key=lambda x: x['temps'], reverse=True)
-    return utilisateurs[:10]
+def classement_top10(guild_id):
+    db = TinyDB('leaderboard.json')
+    table = db.table(str(guild_id))
+
+    users = table.all()
+    users.sort(key=lambda x: x['minutes'], reverse=True)
+
+    return [(u['user_id'], u['minutes']) for u in users[:10]]
