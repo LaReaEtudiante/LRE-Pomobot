@@ -9,6 +9,7 @@ from database import save_time, get_user_times, get_leaderboard, get_global_lead
 from role_manager import setup_roles
 from session_manager import join_session, leave_session, sessions
 from timer import TimerSession
+from keep_alive import keep_alive
 
 # constantes
 ADMIN_ROLE_ID = 1364921809870524436
@@ -180,4 +181,5 @@ async def testping(ctx):
 
 # ----------------- Lancer le Bot -----------------
 if __name__ == '__main__':
+    keep_alive()
     bot.run(TOKEN)
