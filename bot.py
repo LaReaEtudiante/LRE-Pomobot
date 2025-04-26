@@ -5,7 +5,7 @@ from discord.ext import commands
 import configparser
 import asyncio
 from enum import Enum
-
+from database import ajouter_temps, recuperer_temps, classement_top10
 from timer import Timer, TimerStatus
 from keep_alive import keep_alive
 
@@ -86,6 +86,8 @@ async def start_timer(ctx):
             timer.tick()
         if timer.get_status(
         ) == TimerStatus.STOPPED:  # Ping users when timer stops
+            ajouter_temps(ctx.author.id, ctx.guild.id,
+                          int(config['CURRENT_SETTINGS']['work_time']))
             for user in pingList:
                 await ctx.send(f'Pinging {user}')
             pingList.clear()
@@ -105,6 +107,8 @@ async def start_timer(ctx):
             timer.tick()
         if timer.get_status(
         ) == TimerStatus.STOPPED:  # Ping users when timer stops
+            ajouter_temps(ctx.author.id, ctx.guild.id,
+                          int(config['CURRENT_SETTINGS']['work_time']))
             for user in pingList:
                 await ctx.send(f'Pinging {user}')
             pingList.clear()
@@ -227,6 +231,25 @@ async def toggle_long_break(ctx):
                        description=desc,
                        color=MsgColors.AQUA.value)
     await ctx.send(embed=em)
+
+
+@bot.command(name='leaderboard', help='Affiche le classement du serveur')
+async def leaderboard(ctx):
+    top10 = classement_top10(ctx.guild.id)
+    user_time = recuperer_temps(ctx.author.id, ctx.guild.id)
+
+    description = ''
+    for index, (user_id, total_minutes) in enumerate(top10, start=1):
+        user = await bot.fetch_user(user_id)
+        description += f'**#{index}** {user.name} : {total_minutes} minutes\n'
+
+    if ctx.author.id not in [u[0] for u in top10]:
+        description += f'\n**Ton temps personnel** : {user_time} minutes'
+
+    embed = discord.Embed(title="🏆 Leaderboard Pomodoro",
+                          description=description,
+                          color=MsgColors.PURPLE.value)
+    await ctx.send(embed=embed)
 
 
 @bot.command(name='reset', help='Réinitialiser les paramètres du minuteur')
