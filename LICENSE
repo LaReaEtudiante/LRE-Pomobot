@@ -1,21 +1,16 @@
-MIT License
+LRE-Pomobot License (Custom License based on MIT)
 
-Copyright (c) 2019 Minhduc Cao
+Copyright (c) 2025 La Réa Étudiante
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This license supersedes and replaces all previous versions. Any prior licenses, permissions, or attributions regarding this software are no longer valid. Users are responsible for remaining up-to-date with the latest version of this license.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Permission is hereby granted, free of charge, to authorized individuals to use, copy, modify, and deploy this software, subject to the following conditions:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. Only members explicitly authorized by the group "La Réa Étudiante" may modify, distribute, or use the source code and associated documents.
+2. This software and all related documents are private and must not be shared, redistributed, or disclosed publicly without explicit written authorization.
+3. Any commercial use, sale, or resale of this software or its derivatives is strictly prohibited without express written permission from La Réa Étudiante.
+4. This software is provided "AS IS", without warranty of any kind, express or implied, including but not limited to warranties of merchantability, fitness for a particular purpose, and noninfringement.
+5. Under no circumstances shall the authors, La Réa Étudiante, or any associated parties be liable for any claim, damages, or other liability, whether in an action of contract, tort, or otherwise, arising from the use or in connection with the software or the use or other dealings in the software.
+6. Unauthorized use, copying, modification, sharing, or commercialization will result in legal action.
+
+By using this software, you accept these terms in full.
