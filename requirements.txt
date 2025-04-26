@@ -1,4 +1,5 @@
 discord.py
 python-dotenv
-Flask
 tinydb
+Flask
+pytz

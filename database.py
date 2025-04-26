@@ -1,40 +1,40 @@
 from tinydb import TinyDB, Query
 
+db = TinyDB('sessions.json')
 User = Query()
 
 
-def ajouter_temps(user_id: int, guild_id: int, temps: int):
-    """Ajoute du temps de travail pour un utilisateur dans un serveur"""
-    db = TinyDB('leaderboard.json')
-    table = db.table(str(guild_id))
-
-    utilisateur = table.get(User.user_id == user_id)
-    if utilisateur:
-        # Mise à jour si déjà existant
-        nouveau_temps = utilisateur['minutes'] + temps
-        table.update({'minutes': nouveau_temps}, User.user_id == user_id)
+def save_time(user_id: int, mode: str, minutes: int):
+    """Sauvegarde le temps d'étude pour un utilisateur et un mode."""
+    user = db.get(User.user_id == user_id)
+    if user:
+        new_total = user.get(mode, 0) + minutes
+        db.update({mode: new_total}, User.user_id == user_id)
     else:
-        # Sinon créer un nouvel enregistrement
-        table.insert({'user_id': user_id, 'minutes': temps})
+        db.insert({'user_id': user_id, mode: minutes})
 
 
-def recuperer_temps(user_id: int, guild_id: int):
-    """Récupère le temps total de travail d'un utilisateur pour un serveur spécifique"""
-    db = TinyDB('leaderboard.json')
-    table = db.table(str(guild_id))
-    utilisateur = table.get(User.user_id == user_id)
-    if utilisateur:
-        return utilisateur['minutes']
+def get_user_times(user_id: int):
+    """Récupère tous les temps d'un utilisateur."""
+    user = db.get(User.user_id == user_id)
+    if user:
+        return user
     else:
-        return 0
+        return {'50-10': 0, '25-5': 0}
 
 
-def classement_top10(guild_id: int):
-    """Récupère le top 10 des utilisateurs par temps de travail"""
-    db = TinyDB('leaderboard.json')
-    table = db.table(str(guild_id))
+def get_leaderboard(mode: str):
+    """Retourne les 10 meilleurs pour un mode donné."""
+    users = db.all()
+    sorted_users = sorted(users, key=lambda x: x.get(mode, 0), reverse=True)
+    return [(u['user_id'], u.get(mode, 0)) for u in sorted_users[:10]]
 
-    users = table.all()
-    users.sort(key=lambda x: x['minutes'], reverse=True)
 
-    return [(u['user_id'], u['minutes']) for u in users[:10]]
+def get_global_leaderboard():
+    """Retourne les 10 meilleurs en additionnant A et B."""
+    users = db.all()
+    sorted_users = sorted(users,
+                          key=lambda x: x.get('50-10', 0) + x.get('25-5', 0),
+                          reverse=True)
+    return [(u['user_id'], u.get('50-10', 0) + u.get('25-5', 0))
+            for u in sorted_users[:10]]
