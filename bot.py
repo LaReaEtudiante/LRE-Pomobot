@@ -1,231 +1,217 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-import asyncio
-from enum import Enum
-from database import save_time, get_user_times, get_leaderboard, get_global_leaderboard
-from role_manager import setup_roles
-from session_manager import join_session, leave_session, sessions
+from role_manager import RoleManager
+from session_manager import SessionManager
+from database import Database
 from timer import TimerSession
+from flask import Flask
 
-# constantes
-ADMIN_ROLE_ID = 1364921809870524436
-POMODORO_CHANNEL_ID = 1365678171671892018
-COMMAND_PREFIX = '*'
+# Chargement du fichier .env
 load_dotenv()
+
+# Récupération du token Discord
 TOKEN = os.getenv('DISCORD_TOKEN')
 
-# intents
+# Sécurité pour le token Discord
+if TOKEN is None or TOKEN == "":
+    raise ValueError(
+        "❌ Le token Discord n'est pas défini. Vérifiez votre fichier .env ou vos variables d'environnement."
+    )
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
+bot = commands.Bot(command_prefix='*', intents=intents)
 
-bot = commands.Bot(command_prefix=COMMAND_PREFIX,
-                   intents=intents,
-                   help_command=None,
-                   case_insensitive=True)
+# Initialisation des composants
+role_manager = RoleManager()
+session_manager = SessionManager()
+db = Database()
+timer_session = TimerSession(db)
 
-# Variables globales
-maintenance_mode = False
-
-
-# Couleurs embeds
-class MsgColors(Enum):
-    AQUA = 0x33c6bb
-    YELLOW = 0xFFD966
-    RED = 0xEA3546
-    PURPLE = 0x6040b1
+# Flask pour Render
+app = Flask(__name__)
 
 
-# Maintenance check
-def maintenance_check():
-
-    async def predicate(ctx):
-        if maintenance_mode and not any(role.id == ADMIN_ROLE_ID
-                                        for role in ctx.author.roles):
-            embed = discord.Embed(
-                title="Maintenance 🛠️",
-                description=
-                "❌ Le bot est actuellement en maintenance. Merci de patienter.",
-                color=MsgColors.RED.value)
-            await ctx.send(embed=embed)
-            raise commands.CheckFailure("Maintenance active.")
-        return True
-
-    return commands.check(predicate)
+@app.route('/')
+def home():
+    return "Bot is running."
 
 
-# Evenement prêt
+# Fonctions utiles
+async def send_embed(ctx, title, description, color=discord.Color.blue()):
+    embed = discord.Embed(title=title, description=description, color=color)
+    await ctx.send(embed=embed)
+
+
+# Events
 @bot.event
 async def on_ready():
-    print(f"{bot.user} est connecté !")
-    await setup_roles(bot)
-    bot.loop.create_task(start_timers())
+    print(f'{bot.user} est connecté.')
 
 
-# Lancer les timers
-async def start_timers():
-    timer_A = TimerSession('50-10', 50, 10)
-    timer_B = TimerSession('25-5', 25, 5)
-    await asyncio.gather(
-        timer_A.run(bot, POMODORO_CHANNEL_ID,
-                    lambda name: get_participants(name)),
-        timer_B.run(bot, POMODORO_CHANNEL_ID,
-                    lambda name: get_participants(name)))
-
-
-# Participants
-def get_participants(name):
-    mode = '50-10' if name == '50-10' else '25-5'
-    return sessions[mode]
-
-
-# ----------------- Commandes Utilisateurs -----------------
-@bot.command(name='join',
-             help='Rejoindre une session Pomodoro (A: 50-10 [ou] B: 25-5)')
-@maintenance_check()
-async def join(ctx, mode: str):
-    mode = mode.lower()
-    if mode in ['a', '50-10']:
-        await join_session(bot, ctx, '50-10')
-    elif mode in ['b', '25-5']:
-        await join_session(bot, ctx, '25-5')
-    else:
-        embed = discord.Embed(
-            title="Erreur",
-            description="❌ Mode invalide. Utilisez 'A' (50-10) ou 'B' (25-5)",
-            color=MsgColors.RED.value)
-        await ctx.send(embed=embed)
-
-
-@bot.command(name='leave', help='Quitter une session Pomodoro')
-@maintenance_check()
-async def leave(ctx):
-    await leave_session(bot, ctx)
-
-
-@bot.command(name='time', help='Afficher le temps restant pour chaque mode')
-@maintenance_check()
-async def time(ctx):
-    desc = ""
-    for session_name, timer in TimerSession.instances.items():
-        desc += f"**{session_name}** ➔ {timer.remaining_minutes()} minutes restantes ({'Travail' if timer.is_working() else 'Pause'})\n"
-    embed = discord.Embed(title="Temps Restant ⏳",
-                          description=desc,
-                          color=MsgColors.AQUA.value)
+# Commandes pour tous
+@bot.command()
+async def help(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+    embed = discord.Embed(title="Commandes disponibles",
+                          color=discord.Color.green())
+    embed.add_field(name="*join (A: 50-10 ou B: 25-5)",
+                    value="Rejoindre une session.",
+                    inline=False)
+    embed.add_field(name="*leave", value="Quitter une session.", inline=False)
+    embed.add_field(name="*time", value="Voir le temps restant.", inline=False)
+    embed.add_field(name="*status",
+                    value="Voir le statut actuel.",
+                    inline=False)
+    embed.add_field(name="*leaderboard",
+                    value="Voir le classement.",
+                    inline=False)
+    embed.add_field(name="*helpadmin", value="Commandes admin.", inline=False)
     await ctx.send(embed=embed)
 
 
-@bot.command(name='status', help='Voir l\'état actuel des cycles')
-@maintenance_check()
-async def status(ctx):
-    desc = ""
-    for session_name, timer in TimerSession.instances.items():
-        desc += f"**{session_name}** ➔ {'En Travail 📝' if timer.is_working() else 'En Pause ☕'}\n"
-    embed = discord.Embed(title="État des Cycles Pomodoro 📚",
-                          description=desc,
-                          color=MsgColors.AQUA.value)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='leaderboard', help='Voir les classements')
-@maintenance_check()
-async def leaderboard(ctx):
-    top_global = get_global_leaderboard()
-    top_A = get_leaderboard('50-10')
-    top_B = get_leaderboard('25-5')
-    user_times = get_user_times(ctx.author.id)
-
-    desc = "**🏆 Classement Général**\n"
-    for i, (uid, minutes) in enumerate(top_global, start=1):
-        user = await bot.fetch_user(uid)
-        desc += f"**#{i}** {user.name} : {minutes} min\n"
-
-    desc += "\n**📚 Mode A (50-10)**\n"
-    for i, (uid, minutes) in enumerate(top_A, start=1):
-        user = await bot.fetch_user(uid)
-        desc += f"**#{i}** {user.name} : {minutes} min\n"
-
-    desc += "\n**📖 Mode B (25-5)**\n"
-    for i, (uid, minutes) in enumerate(top_B, start=1):
-        user = await bot.fetch_user(uid)
-        desc += f"**#{i}** {user.name} : {minutes} min\n"
-
-    desc += f"\n**Ton Temps Perso :**\n50-10 ➔ {user_times.get('50-10', 0)} min\n25-5 ➔ {user_times.get('25-5', 0)} min"
-
-    embed = discord.Embed(title="Classements Pomodoro 📚",
-                          description=desc,
-                          color=MsgColors.PURPLE.value)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name='help', help='Affiche les commandes disponibles')
-async def help_command(ctx):
-    desc = f"Préfixe : `{COMMAND_PREFIX}`\n\n"
-    desc += "**Commandes Utilisateur :**\n"
-    for command in bot.commands:
-        if command.name not in [
-                'maintenance', 'reloadtimers', 'adminping', 'helpadmin'
-        ]:
-            desc += f"`{command.name}` : {command.help}\n"
-    desc += "\n**Commandes Admin :**\nTapez `*helpadmin` pour voir les commandes admin."
-    embed = discord.Embed(title='Commandes du Bot',
-                          description=desc,
-                          color=MsgColors.PURPLE.value)
-    await ctx.send(embed=embed)
-
-
-# ----------------- Commandes Admin -----------------
-def is_admin():
-
-    async def predicate(ctx):
-        return any(role.id == ADMIN_ROLE_ID for role in ctx.author.roles)
-
-    return commands.check(predicate)
-
-
-@bot.command(name='helpadmin', help='Affiche les commandes admin')
-@is_admin()
+@bot.command()
 async def helpadmin(ctx):
-    desc = "**Commandes Admin :**\n"
-    desc += "`maintenance` : Activer/désactiver le mode maintenance.\n"
-    desc += "`reloadtimers` : Recharger les minuteurs.\n"
-    desc += "`adminping` : Tester un ping admin."
-    embed = discord.Embed(title='Commandes Admin',
-                          description=desc,
-                          color=MsgColors.RED.value)
+    embed = discord.Embed(title="Commandes Admin", color=discord.Color.red())
+    embed.add_field(name="*maintenance",
+                    value="Activer/désactiver la maintenance.",
+                    inline=False)
+    embed.add_field(name="*adminping",
+                    value="Tester la latence du bot (admin).",
+                    inline=False)
+    embed.add_field(name="*pingtest",
+                    value="Tester la latence du bot (admin caché).",
+                    inline=False)
     await ctx.send(embed=embed)
 
 
-@bot.command(name='maintenance', help='Basculer en mode maintenance')
-@is_admin()
+@bot.command()
+async def join(ctx, mode: str = None):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+
+    if mode is None:
+        await send_embed(ctx, "Erreur",
+                         "Veuillez spécifier un mode: A (50-10) ou B (25-5)",
+                         discord.Color.red())
+        return
+
+    mode = mode.lower()
+    if mode in ["50-10", "a"]:
+        await role_manager.add_role(ctx.author, "50-10")
+        await send_embed(ctx, "Succès", "Vous avez rejoint la session 50-10.")
+    elif mode in ["25-5", "b"]:
+        await role_manager.add_role(ctx.author, "25-5")
+        await send_embed(ctx, "Succès", "Vous avez rejoint la session 25-5.")
+    else:
+        await send_embed(ctx, "Erreur",
+                         "Mode invalide. Choisissez A (50-10) ou B (25-5).",
+                         discord.Color.red())
+
+
+@bot.command()
+async def leave(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+
+    await role_manager.remove_roles(ctx.author)
+    await send_embed(ctx, "Succès", "Vous avez quitté votre session.")
+
+
+@bot.command()
+async def time(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+
+    times = timer_session.get_times()
+    embed = discord.Embed(title="Temps Restant", color=discord.Color.blue())
+    embed.add_field(name="50-10",
+                    value=f"{times['50-10']} minutes",
+                    inline=True)
+    embed.add_field(name="25-5", value=f"{times['25-5']} minutes", inline=True)
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def status(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+
+    status = timer_session.get_status()
+    embed = discord.Embed(title="Statut Actuel",
+                          description=f"{status}",
+                          color=discord.Color.blue())
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def leaderboard(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+
+    leaderboard = db.get_leaderboard()
+    embed = discord.Embed(title="Leaderboard", color=discord.Color.gold())
+    for name, score in leaderboard:
+        embed.add_field(name=name, value=f"{score} points", inline=False)
+    await ctx.send(embed=embed)
+
+
+# Commandes admin
+@bot.command()
 async def maintenance(ctx):
-    global maintenance_mode
-    maintenance_mode = not maintenance_mode
-    msg = "Maintenance activée 🛠️" if maintenance_mode else "Maintenance désactivée ✅"
-    embed = discord.Embed(title="Maintenance",
-                          description=msg,
-                          color=MsgColors.RED.value)
-    await ctx.send(embed=embed)
+    if db.toggle_maintenance():
+        await send_embed(ctx, "Maintenance",
+                         "Maintenance activée \U0001F6E0\uFE0F",
+                         discord.Color.red())
+    else:
+        await send_embed(ctx, "Maintenance", "Maintenance désactivée \u2705",
+                         discord.Color.green())
 
 
-@bot.command(name='reloadtimers', help='Recharger les timers')
-@is_admin()
-async def reloadtimers(ctx):
-    await ctx.send("Timers rechargés !")
-
-
-@bot.command(name='adminping', help='Tester un ping admin')
-@is_admin()
+@bot.command()
 async def adminping(ctx):
-    embed = discord.Embed(title="Admin Ping",
-                          description="✅ Admin ping réussi !",
-                          color=MsgColors.AQUA.value)
-    await ctx.send(embed=embed)
+    latency = round(bot.latency * 1000)
+    await send_embed(ctx, "Admin Ping", f"Latence: {latency}ms")
 
 
-# ----------------- Lancer le Bot -----------------
-if __name__ == '__main__':
-    bot.run(TOKEN)
+@bot.command()
+async def pingtest(ctx):
+    latency = round(bot.latency * 1000)
+    await send_embed(ctx, "Ping Test", f"Latence: {latency}ms")
+
+
+# Lancement
+async def main():
+    async with bot:
+        await bot.start(TOKEN)
+
+
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.create_task(
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))))
+    loop.run_until_complete(main())
