@@ -85,6 +85,13 @@ async def status(ctx):
     await ctx.send("Status actuel : (simulé)")
 
 
+@bot.command(name='pingtest',
+             help='Vérifie que le bot fonctionne et affiche la latence')
+async def pingtest(ctx):
+    latency = round(bot.latency * 1000)  # Latence en millisecondes
+    await ctx.send(f"🏓 Pong ! Latence du bot : `{latency}ms`")
+
+
 @bot.command(name='leaderboard', help='Voir les classements')
 async def leaderboard(ctx):
     top_global = get_global_leaderboard()
