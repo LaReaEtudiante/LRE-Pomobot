@@ -1,6 +1,11 @@
+import os
 from tinydb import TinyDB, Query
 
-db = TinyDB('sessions.json')
+# Créer un chemin absolu pour le fichier sessions.json
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'sessions.json')
+
+db = TinyDB(DB_PATH)
 User = Query()
 
 
