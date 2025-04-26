@@ -3,8 +3,8 @@ import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from role_manager import assign_role, remove_role, setup_roles, send_to_pomodoro_channel
-from session_manager import join_session, leave_session
+from role_manager import assign_role, remove_role, setup_roles, send_to_pomodoro_channel, RoleManager
+from session_manager import join_session, leave_session, SessionManager
 from database import Database
 from timer import TimerSession
 from flask import Flask
