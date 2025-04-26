@@ -3,7 +3,7 @@ import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from role_manager import RoleManager
+from role_manager import assign_role, remove_role, setup_roles, send_to_pomodoro_channel
 from session_manager import SessionManager
 from database import Database
 from timer import TimerSession
