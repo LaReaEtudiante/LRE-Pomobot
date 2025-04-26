@@ -17,11 +17,13 @@ def ajouter_temps(user_id: int, temps: int):
         db.insert({'user_id': user_id, 'temps': temps})
 
 
-def recuperer_temps(user_id: int):
-    """Récupère le temps total de travail d'un utilisateur"""
-    utilisateur = db.get(User.user_id == user_id)
+def recuperer_temps(user_id: int, guild_id: int):
+    """Récupère le temps total de travail d'un utilisateur pour un serveur spécifique"""
+    db = TinyDB('leaderboard.json')
+    table = db.table(str(guild_id))
+    utilisateur = table.get(User.user_id == user_id)
     if utilisateur:
-        return utilisateur['temps']
+        return utilisateur['minutes']
     else:
         return 0
 
