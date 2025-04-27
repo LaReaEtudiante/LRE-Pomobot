@@ -1,7 +1,9 @@
+# role_manager.py
+
 import discord
 
+
 class RoleManager:
-    # Constants exposés sur l'instance
     ROLE_50_10 = '50-10'
     ROLE_25_5 = '25-5'
     POMODORO_CHANNEL_ID = 1365678171671892018
@@ -10,15 +12,11 @@ class RoleManager:
         for guild in bot.guilds:
             existing = {r.name for r in guild.roles}
             if self.ROLE_50_10 not in existing:
-                await guild.create_role(
-                    name=self.ROLE_50_10,
-                    color=discord.Color.blue()
-                )
+                await guild.create_role(name=self.ROLE_50_10,
+                                        color=discord.Color.blue())
             if self.ROLE_25_5 not in existing:
-                await guild.create_role(
-                    name=self.ROLE_25_5,
-                    color=discord.Color.green()
-                )
+                await guild.create_role(name=self.ROLE_25_5,
+                                        color=discord.Color.green())
 
     async def add_role(self, member: discord.Member, mode: str):
         role_name = self.ROLE_50_10 if mode == self.ROLE_50_10 else self.ROLE_25_5
@@ -34,9 +32,7 @@ class RoleManager:
 
     async def send_to_pomodoro(self, bot, embed: discord.Embed):
         for guild in bot.guilds:
-            channel = discord.utils.get(
-                guild.text_channels,
-                id=self.POMODORO_CHANNEL_ID
-            )
+            channel = discord.utils.get(guild.text_channels,
+                                        id=self.POMODORO_CHANNEL_ID)
             if channel:
                 await channel.send(embed=embed)
