@@ -1,41 +1,27 @@
-import asyncio
-import datetime
-import pytz
+                from typing import Dict, Set, List
+                import discord
+                from role_manager import ROLE_50_10, ROLE_25_5
 
-class TimerSession:
-    def __init__(self, name: str, work_duration: int, break_duration: int):
-        self.name = name
-        self.work_duration = work_duration
-        self.break_duration = break_duration
-        self.is_working = True
-        self.time_left = work_duration
+                class SessionManager:
+                    def __init__(self):
+                        self.sessions: Dict[str, Set[int]] = {'50-10': set(), '25-5': set()}
 
-    async def run(self, bot, channel_id, get_participants):
-        tz = pytz.timezone('Europe/Paris')
-        await bot.wait_until_ready()
-        channel = bot.get_channel(channel_id)
-        if not channel:
-            return
+                    async def join(self, member: discord.Member, mode: str):
+                        mode = mode.lower()
+                        other = '25-5' if mode == '50-10' else '50-10'
+                        if member.id in self.sessions[other]:
+                            return False, f"Tu es déjà dans la session {other}."
+                        if member.id in self.sessions[mode]:
+                            return False, f"Tu es déjà dans la session {mode}."
+                        self.sessions[mode].add(member.id)
+                        return True, None
 
-        while True:
-            now = datetime.datetime.now(tz)
-            to_sleep = 60 - now.second
-            await asyncio.sleep(to_sleep)
+                    async def leave(self, member: discord.Member):
+                        for mode, users in self.sessions.items():
+                            if member.id in users:
+                                users.remove(member.id)
+                                return True, mode
+                        return False, None
 
-            participants = get_participants(self.name)
-            if not participants:
-                continue
-
-            self.time_left -= 1
-            if self.time_left <= 0:
-                self.is_working = not self.is_working
-                self.time_left = self.work_duration if self.is_working else self.break_duration
-
-                state = "Session de travail" if self.is_working else "Pause"
-                mentions = ' '.join(m.mention for m in participants)
-                embed = discord.Embed(
-                    title=f"⏰ {state} {self.name}",
-                    description=f"{mentions}\nParticipants: {len(participants)}",
-                    color=discord.Color.purple()
-                )
-                await channel.send(embed=embed)
+                    def get_participants(self, mode: str, guild: discord.Guild) -> List[discord.Member]:
+                        return [guild.get_member(uid) for uid in self.sessions[mode] if guild.get_member(uid)]
