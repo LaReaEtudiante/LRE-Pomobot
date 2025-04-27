@@ -1,49 +1,32 @@
 import discord
 
-# IDs des rôles pour les modes 50-10 et 25-5
-ROLE_50_10_NAME = "50-10"
-ROLE_25_5_NAME = "25-5"
-
-# ID du salon Pomodoro
+ROLE_50_10 = '50-10'
+ROLE_25_5 = '25-5'
 POMODORO_CHANNEL_ID = 1365678171671892018
 
+class RoleManager:
+    async def setup_roles(self, bot: discord.Bot):
+        for guild in bot.guilds:
+            names = {r.name for r in guild.roles}
+            if ROLE_50_10 not in names:
+                await guild.create_role(name=ROLE_50_10, color=discord.Color.blue())
+            if ROLE_25_5 not in names:
+                await guild.create_role(name=ROLE_25_5, color=discord.Color.green())
 
-async def setup_roles(bot):
-    """Créer les rôles 50-10 et 25-5 s'ils n'existent pas."""
-    for guild in bot.guilds:
-        existing_roles = {role.name: role for role in guild.roles}
+    async def add_role(self, member: discord.Member, mode: str):
+        role_name = ROLE_50_10 if mode == '50-10' else ROLE_25_5
+        role = discord.utils.get(member.guild.roles, name=role_name)
+        if role:
+            await member.add_roles(role)
 
-        if ROLE_50_10_NAME not in existing_roles:
-            await guild.create_role(name=ROLE_50_10_NAME,
-                                    color=discord.Color.blue())
-            print(f"Rôle {ROLE_50_10_NAME} créé.")
+    async def remove_roles(self, member: discord.Member):
+        for mode in (ROLE_50_10, ROLE_25_5):
+            role = discord.utils.get(member.guild.roles, name=mode)
+            if role in member.roles:
+                await member.remove_roles(role)
 
-        if ROLE_25_5_NAME not in existing_roles:
-            await guild.create_role(name=ROLE_25_5_NAME,
-                                    color=discord.Color.green())
-            print(f"Rôle {ROLE_25_5_NAME} créé.")
-
-
-async def assign_role(member, mode):
-    """Assigner un rôle selon le mode choisi."""
-    role_name = ROLE_50_10_NAME if mode == '50-10' else ROLE_25_5_NAME
-    role = discord.utils.get(member.guild.roles, name=role_name)
-    if role:
-        await member.add_roles(role)
-
-
-async def remove_role(member, mode):
-    """Enlever un rôle selon le mode quitté."""
-    role_name = ROLE_50_10_NAME if mode == '50-10' else ROLE_25_5_NAME
-    role = discord.utils.get(member.guild.roles, name=role_name)
-    if role:
-        await member.remove_roles(role)
-
-
-async def send_to_pomodoro_channel(bot, embed):
-    """Envoyer un message dans le salon Pomodoro."""
-    for guild in bot.guilds:
-        channel = discord.utils.get(guild.text_channels,
-                                    id=POMODORO_CHANNEL_ID)
-        if channel:
-            await channel.send(embed=embed)
+    async def send_to_pomodoro(self, bot: discord.Bot, embed: discord.Embed):
+        for guild in bot.guilds:
+            channel = discord.utils.get(guild.text_channels, id=POMODORO_CHANNEL_ID)
+            if channel:
+                await channel.send(embed=embed)

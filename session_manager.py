@@ -1,56 +1,27 @@
+from typing import Dict, Set, List
 import discord
-import datetime
-from role_manager import assign_role, remove_role, send_to_pomodoro_channel
+from role_manager import ROLE_50_10, ROLE_25_5
 
-# Système mémoire temporaire pour les sessions (RAM uniquement)
-sessions = {'50-10': set(), '25-5': set()}
+class SessionManager:
+    def __init__(self):
+        self.sessions: Dict[str, Set[int]] = {'50-10': set(), '25-5': set()}
 
+    async def join(self, member: discord.Member, mode: str):
+        mode = mode.lower()
+        other = '25-5' if mode == '50-10' else '50-10'
+        if member.id in self.sessions[other]:
+            return False, f"Tu es déjà dans la session {other}."
+        if member.id in self.sessions[mode]:
+            return False, f"Tu es déjà dans la session {mode}."
+        self.sessions[mode].add(member.id)
+        return True, None
 
-async def join_session(bot, ctx, mode):
-    """Ajouter un membre à une session."""
-    mode = mode.lower()
-    if mode not in sessions:
-        await ctx.send("❌ Mode invalide. Utilisez `50-10` ou `25-5`.")
-        return
+    async def leave(self, member: discord.Member):
+        for mode, users in self.sessions.items():
+            if member.id in users:
+                users.remove(member.id)
+                return True, mode
+        return False, None
 
-    # Vérifie si déjà inscrit dans un autre mode
-    other_mode = '25-5' if mode == '50-10' else '50-10'
-    if ctx.author.id in sessions[other_mode]:
-        await ctx.send(
-            "❌ Tu es déjà inscrit dans l'autre mode. Utilise `*leave` avant.")
-        return
-
-    if ctx.author.id in sessions[mode]:
-        await ctx.send("⚠️ Tu es déjà dans ce mode.")
-        return
-
-    sessions[mode].add(ctx.author.id)
-    await assign_role(ctx.author, mode)
-
-    embed = discord.Embed(
-        title="🎯 Session Rejointe",
-        description=
-        f"{ctx.author.mention} a rejoint la session **{mode.upper()}** !",
-        color=0x33c6bb)
-    await send_to_pomodoro_channel(bot, embed)
-
-
-async def leave_session(bot, ctx):
-    """Retirer un membre de sa session."""
-    found = False
-    for mode in sessions:
-        if ctx.author.id in sessions[mode]:
-            sessions[mode].remove(ctx.author.id)
-            await remove_role(ctx.author, mode)
-            found = True
-
-            embed = discord.Embed(
-                title="👋 Session quittée",
-                description=
-                f"{ctx.author.mention} a quitté la session **{mode.upper()}**.",
-                color=0xEA3546)
-            await send_to_pomodoro_channel(bot, embed)
-            break
-
-    if not found:
-        await ctx.send("⚠️ Tu n'es inscrit dans aucune session.")
+    def get_participants(self, mode: str, guild: discord.Guild) -> List[discord.Member]:
+        return [guild.get_member(uid) for uid in self.sessions[mode] if guild.get_member(uid)]
