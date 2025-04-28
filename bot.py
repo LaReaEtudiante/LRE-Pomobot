@@ -6,7 +6,6 @@ import configparser
 import asyncio
 from enum import Enum
 from database import ajouter_temps, recuperer_temps, classement_top10
-#from timer import Timer, TimerStatus # Plus besoin de Timer ou TimerStatus
 from keep_alive import keep_alive
 import logging  # Import du module logging
 
@@ -92,7 +91,7 @@ async def join_pomodoro(ctx):
             role = await ctx.guild.create_role(name=POMODORO_ROLE_NAME)
             await ctx.send(f"Rôle '{POMODORO_ROLE_NAME}' créé.")
             logger.info(f"Rôle '{POMODORO_ROLE_NAME}' créé.")
-        await user.add_role(role)
+        await user.add_roles(role)
         await ctx.send(f"{user.mention} a rejoint le Pomodoro.")
         logger.info(f"{user.name} a rejoint le Pomodoro.")
     else:
@@ -109,7 +108,7 @@ async def leave_pomodoro(ctx):
         # Retirer le rôle "50-10"
         role = discord.utils.get(ctx.guild.roles, name=POMODORO_ROLE_NAME)
         if role is not None:
-            await user.remove_role(role)
+            await user.remove_roles(role)
         await ctx.send(f"{user.mention} a quitté le Pomodoro.")
         logger.info(f"{user.name} a quitté le Pomodoro.")
     else:
@@ -133,14 +132,13 @@ async def leaderboard(ctx):
     await ctx.send(embed=embed)
 
 
-@bot.command(name='help', help='Décrit toutes les commandes du bot.')
+@bot.command(name='help', aliases=['aide'], help='Décrit toutes les commandes du bot.')
 @check_maintenance_mode()
 async def help(ctx):
-    help_commands = dict()
-    for command in bot.commands:
-        help_commands[command.name] = command.help
+    help_commands = {cmd.name: cmd.help for cmd in bot.commands}
 
-    desc = 'Le préfixe pour ce bot est `' + COMMAND_PREFIX + '`\n'
+    # Utilisation de ctx.prefix au lieu de COMMAND_PREFIX
+    desc = f'Le préfixe pour ce bot est `{ctx.prefix}`\n'
     desc += '\n**Commandes Pomodoro**\n'
     desc += '`{:12s}` {}\n'.format('join', help_commands.get('join', ''))
     desc += '`{:12s}` {}\n'.format('leave', help_commands.get('leave', ''))
