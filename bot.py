@@ -3,8 +3,8 @@ import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from role_manager import RoleManager
-from session_manager import SessionManager
+from role_manager import assign_role, remove_role, setup_roles, send_to_pomodoro_channel, RoleManager
+from session_manager import join_session, leave_session, SessionManager
 from database import Database
 from timer import TimerSession
 from flask import Flask
@@ -31,7 +31,7 @@ bot = commands.Bot(command_prefix='*', intents=intents)
 role_manager = RoleManager()
 session_manager = SessionManager()
 db = Database()
-timer_session = TimerSession("default_session", 50, 10)  # Initialisation corrigée
+timer_session = TimerSession(db)
 
 # Flask pour Render
 app = Flask(__name__)
