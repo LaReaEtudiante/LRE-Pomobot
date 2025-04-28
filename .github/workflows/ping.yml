@@ -1,0 +1,12 @@
+name: Keep Render Service Alive
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+
+jobs:
+  ping_render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Web Service
+        run: curl -fsS https://lre-pomobot.onrender.com/ || true
