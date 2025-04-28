@@ -57,7 +57,10 @@ def check_maintenance_mode():  # Décorateur pour le mode maintenance
 async def on_ready():
     print(f'{bot.user} est connecté à Discord.')
     logger.info(f'{bot.user} est connecté à Discord.')  # Log au démarrage
-    pomodoro_loop.start()  # Démarrer la boucle Pomodoro
+    # Démarrer ou relancer la boucle Pomodoro si nécessaire
+    if not pomodoro_loop.is_running():
+        pomodoro_loop.start()
+        logger.info('Boucle Pomodoro démarrée.')
 
 
 @bot.event
@@ -137,7 +140,6 @@ async def leaderboard(ctx):
 async def help(ctx):
     help_commands = {cmd.name: cmd.help for cmd in bot.commands}
 
-    # Utilisation de ctx.prefix au lieu de COMMAND_PREFIX
     desc = f'Le préfixe pour ce bot est `{ctx.prefix}`\n'
     desc += '\n**Commandes Pomodoro**\n'
     desc += '`{:12s}` {}\n'.format('join', help_commands.get('join', ''))
@@ -168,28 +170,31 @@ async def set_pomodoro(ctx, work_time: int, break_time: int):
 
 @tasks.loop(minutes=1)  # La boucle tourne toutes les minutes
 async def pomodoro_loop():
-    work_time = int(config['CURRENT_SETTINGS']['work_time'])
-    break_time = int(config['CURRENT_SETTINGS']['break_time'])
-    channel = bot.get_channel(1199346210421295177)  # ID du canal où envoyer les messages
-    if channel is not None:
-        await channel.send(f"Début de la session de travail ({work_time} minutes) ! {get_role_mention(channel.guild)}")
-        logger.info(f"Début de la session de travail ({work_time} minutes).")
-        for minute in range(work_time):
-            await asyncio.sleep(60)  # Attendre une minute
-            if minute % 5 == 0:
-                remaining = work_time - minute - 1
-                await channel.send(f"{remaining} minutes restantes.")
-        await channel.send(f"Début de la pause ({break_time} minutes) ! {get_role_mention(channel.guild)}")
-        logger.info(f"Début de la pause ({break_time} minutes).")
-        for _ in range(break_time):
-            await asyncio.sleep(60)  # Attendre une minute
-        if PARTICIPANTS:  # Ajouter le temps de travail à chaque participant
-            for user_id in PARTICIPANTS:
-                ajouter_temps(user_id, channel.guild.id, work_time)
-            logger.info(f"Temps de travail ajouté aux participants : {PARTICIPANTS}")
-        else:
-            await channel.send("Aucun participant à cette session.")
-            logger.info("Aucun participant à cette session.")
+    try:
+        work_time = int(config['CURRENT_SETTINGS']['work_time'])
+        break_time = int(config['CURRENT_SETTINGS']['break_time'])
+        channel = bot.get_channel(1199346210421295177)  # ID du canal où envoyer les messages
+        if channel is not None:
+            await channel.send(f"Début de la session de travail ({work_time} minutes) ! {get_role_mention(channel.guild)}")
+            logger.info(f"Début de la session de travail ({work_time} minutes).")
+            for minute in range(work_time):
+                await asyncio.sleep(60)  # Attendre une minute
+                if minute % 5 == 0:
+                    remaining = work_time - minute - 1
+                    await channel.send(f"{remaining} minutes restantes.")
+            await channel.send(f"Début de la pause ({break_time} minutes) ! {get_role_mention(channel.guild)}")
+            logger.info(f"Début de la pause ({break_time} minutes).")
+            for _ in range(break_time):
+                await asyncio.sleep(60)  # Attendre une minute
+            if PARTICIPANTS:  # Ajouter le temps de travail à chaque participant
+                for user_id in PARTICIPANTS:
+                    ajouter_temps(user_id, channel.guild.id, work_time)
+                logger.info(f"Temps de travail ajouté aux participants : {PARTICIPANTS}")
+            else:
+                await channel.send("Aucun participant à cette session.")
+                logger.info("Aucun participant à cette session.")
+    except Exception as e:
+        logger.error("Erreur in pomodoro_loop", exc_info=True)
 
 
 def get_role_mention(guild: discord.Guild):
