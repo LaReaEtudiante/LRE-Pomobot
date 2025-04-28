@@ -1,293 +1,217 @@
-    import os
-    import discord
-    from discord.ext import commands
-    from dotenv import load_dotenv
-    import asyncio
-    from pytz import timezone
-    from datetime import datetime
-    from tinydb import TinyDB, Query
-    from flask import Flask
-    from threading import Thread
+import os
+import asyncio
+import discord
+from discord.ext import commands
+from dotenv import load_dotenv
+from role_manager import assign_role, remove_role, setup_roles, send_to_pomodoro_channel, RoleManager
+from session_manager import join_session, leave_session, SessionManager
+from database import Database
+from timer import TimerSession
+from flask import Flask
 
-    # --- Chargement des variables d'environnement ---
-    load_dotenv()
-    TOKEN = os.getenv('DISCORD_TOKEN')
-    POMODORO_CHANNEL_ID = int(os.getenv('POMODORO_CHANNEL_ID', 0))  # Assurez-vous que la variable est définie dans .env
+# Chargement du fichier .env
+load_dotenv()
 
-    # --- Configuration des intents Discord ---
-    intents = discord.Intents.default()
-    intents.members = True
-    intents.message_content = True  # Nécessaire pour lire le contenu des messages
+# Récupération du token Discord
+TOKEN = os.getenv('DISCORD_TOKEN')
 
-    bot = commands.Bot(command_prefix='*', intents=intents)
+# Sécurité pour le token Discord
+if TOKEN is None or TOKEN == "":
+    raise ValueError(
+        "❌ Le token Discord n'est pas défini. Vérifiez votre fichier .env ou vos variables d'environnement."
+    )
 
-    # --- Configuration de la base de données TinyDB ---
-    db = TinyDB('sessions.json')
-    User = Query()
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.members = True
+bot = commands.Bot(command_prefix='*', intents=intents)
 
-    # --- Variables globales ---
-    maintenance_mode = False
+# Initialisation des composants
+role_manager = RoleManager()
+session_manager = SessionManager()
+db = Database()
+timer_session = TimerSession(db)
 
-    # --- Classe RoleManager ---
-    class RoleManager:
-        ROLE_50_10 = 'Pomodoro 50-10'
-        ROLE_25_5 = 'Pomodoro 25-5'
-        POMODORO_CHANNEL_ID = POMODORO_CHANNEL_ID
+# Flask pour Render
+app = Flask(__name__)
 
-        async def setup_roles(self, guild):
-            role_50 = discord.utils.get(guild.roles, name=self.ROLE_50_10)
-            if role_50 is None:
-                await guild.create_role(name=self.ROLE_50_10)
 
-            role_25 = discord.utils.get(guild.roles, name=self.ROLE_25_5)
-            if role_25 is None:
-                await guild.create_role(name=self.ROLE_25_5)
+@app.route('/')
+def home():
+    return "Bot is running."
 
-        async def add_role(self, member, mode):
-            role_name = self.ROLE_50_10 if mode == '50-10' else self.ROLE_25_5
-            role = discord.utils.get(member.guild.roles, name=role_name)
-            if role:
-                await member.add_roles(role)
 
-        async def remove_roles(self, member):
-            role_50 = discord.utils.get(member.guild.roles, name=self.ROLE_50_10)
-            role_25 = discord.utils.get(member.guild.roles, name=self.ROLE_25_5)
-            if role_50:
-                await member.remove_roles(role_50)
-            if role_25:
-                await member.remove_roles(role_25)
+# Fonctions utiles
+async def send_embed(ctx, title, description, color=discord.Color.blue()):
+    embed = discord.Embed(title=title, description=description, color=color)
+    await ctx.send(embed=embed)
 
-        async def send_to_pomodoro(self, bot, embed):
-            channel = bot.get_channel(self.POMODORO_CHANNEL_ID)
-            if channel:
-                await channel.send(embed=embed)
-            else:
-                print(f"Erreur: Le salon Pomodoro avec l'ID {self.POMODORO_CHANNEL_ID} n'a pas été trouvé.")
 
-    # --- Classe SessionManager ---
-    class SessionManager:
-        def __init__(self):
-            self.sessions = {}  # {'guild_id': {'50-10': set(), '25-5': set()}}
+# Events
+@bot.event
+async def on_ready():
+    print(f'{bot.user} est connecté.')
 
-        def _ensure_guild_exists(self, guild_id):
-            if guild_id not in self.sessions:
-                self.sessions[guild_id] = {'50-10': set(), '25-5': set()}
 
-        def join(self, member, mode):
-            guild_id = member.guild.id
-            self._ensure_guild_exists(guild_id)
-            self.sessions[guild_id][mode].add(member.id)
+# Commandes pour tous
+@bot.command()
+async def help(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
+    embed = discord.Embed(title="Commandes disponibles",
+                          color=discord.Color.green())
+    embed.add_field(name="*join (A: 50-10 ou B: 25-5)",
+                    value="Rejoindre une session.",
+                    inline=False)
+    embed.add_field(name="*leave", value="Quitter une session.", inline=False)
+    embed.add_field(name="*time", value="Voir le temps restant.", inline=False)
+    embed.add_field(name="*status",
+                    value="Voir le statut actuel.",
+                    inline=False)
+    embed.add_field(name="*leaderboard",
+                    value="Voir le classement.",
+                    inline=False)
+    embed.add_field(name="*helpadmin", value="Commandes admin.", inline=False)
+    await ctx.send(embed=embed)
 
-        def leave(self, member):
-            guild_id = member.guild.id
-            self._ensure_guild_exists(guild_id)
-            for mode in self.sessions[guild_id]:
-                if member.id in self.sessions[guild_id][mode]:
-                    self.sessions[guild_id][mode].remove(member.id)
-                    break
 
-        def get_participants(self, mode, guild):
-            guild_id = guild.id
-            self._ensure_guild_exists(guild_id)
-            participant_ids = self.sessions[guild_id].get(mode, set())
-            return [guild.get_member(user_id) for user_id in participant_ids if guild.get_member(user_id) is not None]
+@bot.command()
+async def helpadmin(ctx):
+    embed = discord.Embed(title="Commandes Admin", color=discord.Color.red())
+    embed.add_field(name="*maintenance",
+                    value="Activer/désactiver la maintenance.",
+                    inline=False)
+    embed.add_field(name="*adminping",
+                    value="Tester la latence du bot (admin).",
+                    inline=False)
+    embed.add_field(name="*pingtest",
+                    value="Tester la latence du bot (admin caché).",
+                    inline=False)
+    await ctx.send(embed=embed)
 
-    # --- Classe TimerSession ---
-    class TimerSession:
-        def __init__(self, bot, guild, mode):
-            self.bot = bot
-            self.guild = guild
-            self.mode = mode
-            self.participants = set()
-            self.is_working = True
-            self.time_left = 50 if mode == '50-10' else 25
-            self.session_manager = bot.session_manager
-            self.role_manager = bot.role_manager
-            self.timezone = timezone('Europe/Paris')
 
-        async def run(self):
-            while True:
-                now = datetime.now(self.timezone)
-                seconds_to_wait = 60 - now.second
-                await asyncio.sleep(seconds_to_wait)
+@bot.command()
+async def join(ctx, mode: str = None):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
 
-                if maintenance_mode:
-                    continue
+    if mode is None:
+        await send_embed(ctx, "Erreur",
+                         "Veuillez spécifier un mode: A (50-10) ou B (25-5)",
+                         discord.Color.red())
+        return
 
-                participants = self.session_manager.get_participants(self.mode, self.guild)
-                if not participants:
-                    continue
+    mode = mode.lower()
+    if mode in ["50-10", "a"]:
+        await role_manager.add_role(ctx.author, "50-10")
+        await send_embed(ctx, "Succès", "Vous avez rejoint la session 50-10.")
+    elif mode in ["25-5", "b"]:
+        await role_manager.add_role(ctx.author, "25-5")
+        await send_embed(ctx, "Succès", "Vous avez rejoint la session 25-5.")
+    else:
+        await send_embed(ctx, "Erreur",
+                         "Mode invalide. Choisissez A (50-10) ou B (25-5).",
+                         discord.Color.red())
 
-                if self.is_working:
-                    for member in participants:
-                        self.save_time(member.id, self.mode, 1)
-                    self.time_left -= 1
-                else:
-                    self.time_left -= 1
 
-                if self.time_left == 0:
-                    self.is_working = not self.is_working
-                    duration = 50 if self.mode == '50-10' and self.is_working else (10 if self.mode == '50-10' else 5)
-                    self.time_left = duration
+@bot.command()
+async def leave(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
 
-                    embed = discord.Embed(
-                        title=f"Pomodoro {'Travail' if self.is_working else 'Pause'} ({self.mode})",
-                        description=f"Début de la session de {'travail' if self.is_working else 'pause'} de {duration} minutes.",
-                        color=discord.Color.green() if self.is_working else discord.Color.blue()
-                    )
-                    mentions = ' '.join(member.mention for member in participants)
-                    embed.add_field(name="Participants", value=mentions if mentions else "Aucun participant", inline=False)
-                    await self.role_manager.send_to_pomodoro(self.bot, embed)
+    await role_manager.remove_roles(ctx.author)
+    await send_embed(ctx, "Succès", "Vous avez quitté votre session.")
 
-    # --- Initialisation des managers ---
-    bot.role_manager = RoleManager()
-    bot.session_manager = SessionManager()
-    bot.timer_sessions = {} # {(guild_id, mode): TimerSession instance}
 
-    # --- Fonctions de base de données ---
-    def save_time(user_id, mode, minutes):
-        user_data = db.get(User.user_id == user_id)
-        if user_data:
-            db.update({mode: user_data.get(mode, 0) + minutes}, User.user_id == user_id)
-        else:
-            db.insert({'user_id': user_id, mode: minutes})
+@bot.command()
+async def time(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
 
-    def get_user_times(user_id):
-        return db.get(User.user_id == user_id)
+    times = timer_session.get_times()
+    embed = discord.Embed(title="Temps Restant", color=discord.Color.blue())
+    embed.add_field(name="50-10",
+                    value=f"{times['50-10']} minutes",
+                    inline=True)
+    embed.add_field(name="25-5", value=f"{times['25-5']} minutes", inline=True)
+    await ctx.send(embed=embed)
 
-    def get_leaderboard(mode=None):
-        all_users = db.all()
-        if mode:
-            sorted_users = sorted([user for user in all_users if mode in user], key=lambda x: x.get(mode, 0), reverse=True)
-        else:
-            # Somme du temps dans les deux modes pour le leaderboard global
-            sorted_users = sorted(all_users, key=lambda x: x.get('50-10', 0) + x.get('25-5', 0), reverse=True)
-        return sorted_users[:10]
 
-    def is_maintenance():
-        maintenance_data = db.get(User.user_id == 0)
-        return maintenance_data.get('maintenance', False) if maintenance_data else False
+@bot.command()
+async def status(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
 
-    def toggle_maintenance():
-        global maintenance_mode
-        maintenance_mode = not maintenance_mode
-        if not db.get(User.user_id == 0):
-            db.insert({'user_id': 0, 'maintenance': maintenance_mode})
-        else:
-            db.update({'maintenance': maintenance_mode}, User.user_id == 0)
-        return maintenance_mode
+    status = timer_session.get_status()
+    embed = discord.Embed(title="Statut Actuel",
+                          description=f"{status}",
+                          color=discord.Color.blue())
+    await ctx.send(embed=embed)
 
-    # --- Commandes du bot ---
-    @bot.command(name='join')
-    async def join_session(ctx, mode: str):
-        if is_maintenance():
-            await ctx.send("La commande est temporairement indisponible en mode maintenance.")
-            return
-        mode = mode.upper()
-        if mode not in ['A', 'B']:
-            await ctx.send("Mode invalide. Utilisez 'A' pour 50-10 ou 'B' pour 25-5.")
-            return
-        pomodoro_mode = '50-10' if mode == 'A' else '25-5'
-        bot.session_manager.join(ctx.author, pomodoro_mode)
-        await bot.role_manager.add_role(ctx.author, pomodoro_mode)
-        await ctx.send(f"{ctx.author.mention} a rejoint la session Pomodoro {pomodoro_mode}.")
 
-    @bot.command(name='leave')
-    async def leave_session(ctx):
-        if is_maintenance():
-            await ctx.send("La commande est temporairement indisponible en mode maintenance.")
-            return
-        bot.session_manager.leave(ctx.author)
-        await bot.role_manager.remove_roles(ctx.author)
-        await ctx.send(f"{ctx.author.mention} a quitté la session Pomodoro.")
+@bot.command()
+async def leaderboard(ctx):
+    if db.is_maintenance():
+        await ctx.send(
+            "\u274c Le bot est actuellement en maintenance. Merci de patienter."
+        )
+        return
 
-    @bot.command(name='time')
-    async def show_time(ctx):
-        if is_maintenance():
-            await ctx.send("La commande est temporairement indisponible en mode maintenance.")
-            return
-        guild_timers = [timer for (guild_id, mode), timer in bot.timer_sessions.items() if guild_id == ctx.guild.id]
-        if not guild_timers:
-            await ctx.send("Aucune session Pomodoro active sur ce serveur.")
-            return
+    leaderboard = db.get_leaderboard()
+    embed = discord.Embed(title="Leaderboard", color=discord.Color.gold())
+    for name, score in leaderboard:
+        embed.add_field(name=name, value=f"{score} points", inline=False)
+    await ctx.send(embed=embed)
 
-        response = ""
-        for timer in guild_timers:
-            status = "Travail" if timer.is_working else "Pause"
-            response += f"Mode {timer.mode}: {status} ({timer.time_left} min restantes)\n"
-        await ctx.send(response)
 
-    @bot.command(name='leaderboard')
-    async def show_leaderboard(ctx, mode: str = None):
-        if is_maintenance():
-            await ctx.send("La commande est temporairement indisponible en mode maintenance.")
-            return
-        if mode and mode.upper() not in ['50-10', '25-5']:
-            await ctx.send("Mode de leaderboard invalide. Utilisez '50-10' ou '25-5' (ou laissez vide pour le classement général).")
-            return
-        leaderboard = get_leaderboard(mode)
-        if not leaderboard:
-            await ctx.send("Aucun temps de travail enregistré pour le moment.")
-            return
+# Commandes admin
+@bot.command()
+async def maintenance(ctx):
+    if db.toggle_maintenance():
+        await send_embed(ctx, "Maintenance",
+                         "Maintenance activée \U0001F6E0\uFE0F",
+                         discord.Color.red())
+    else:
+        await send_embed(ctx, "Maintenance", "Maintenance désactivée \u2705",
+                         discord.Color.green())
 
-        title = "Leaderboard Pomodoro"
-        if mode:
-            title += f" ({mode})"
-        embed = discord.Embed(title=title, color=discord.Color.gold())
-        for i, user_data in enumerate(leaderboard):
-            user = bot.get_user(user_data['user_id'])
-            time_50 = user_data.get('50-10', 0)
-            time_25 = user_data.get('25-5', 0)
-            total_time = time_50 + time_25 if not mode else (time_50 if mode == '50-10' else time_25)
-            embed.add_field(name=f"{i+1}. {user.name if user else 'Utilisateur inconnu'}", value=f"{total_time} minutes travaillées", inline=False)
-        await ctx.send(embed=embed)
 
-    @bot.command(name='maintenance')
-    @commands.is_owner()
-    async def maintenance_toggle(ctx):
-        global maintenance_mode
-        maintenance_mode = toggle_maintenance()
-        status = "activé" if maintenance_mode else "désactivé"
-        await ctx.send(f"Le mode maintenance a été {status}.")
+@bot.command()
+async def adminping(ctx):
+    latency = round(bot.latency * 1000)
+    await send_embed(ctx, "Admin Ping", f"Latence: {latency}ms")
 
-    @bot.command(name='helpadmin')
-    @commands.is_owner()
-    async def help_admin(ctx):
-        embed = discord.Embed(title="Commandes Administrateur", color=discord.Color.red())
-        embed.add_field(name="*maintenance", value="Activer/désactiver le mode maintenance.", inline=False)
-        await ctx.send(embed=embed)
 
-    @bot.event
-    async def on_command_error(ctx, error):
-        if isinstance(error, commands.CheckFailure):
-            await ctx.send("Commande indisponible (maintenance ou permissions).")
-        else:
-            print(f"Erreur lors de l'exécution de la commande '{ctx.command.name}': {error}")
-            await ctx.send("Une erreur est survenue lors de l'exécution de cette commande.")
+@bot.command()
+async def pingtest(ctx):
+    latency = round(bot.latency * 1000)
+    await send_embed(ctx, "Ping Test", f"Latence: {latency}ms")
 
-    @bot.event
-    async def on_ready():
-        print(f'Connecté en tant que {bot.user.name}#{bot.user.discriminator}')
-        await bot.change_presence(activity=discord.Game(name="Gérer vos Pomodoros"))
 
-        for guild in bot.guilds:
-            await bot.role_manager.setup_roles(guild)
-            bot.timer_sessions[(guild.id, '50-10')] = TimerSession(bot, guild, '50-10')
-            bot.timer_sessions[(guild.id, '25-5')] = TimerSession(bot, guild, '25-5')
-            asyncio.create_task(bot.timer_sessions[(guild.id, '50-10')].run())
-            asyncio.create_task(bot.timer_sessions[(guild.id, '25-5')].run())
+# Lancement
+async def main():
+    async with bot:
+        await bot.start(TOKEN)
 
-    # --- Serveur Flask pour le keep-alive ---
-    app = Flask(__name__)
 
-    @app.route('/')
-    def home():
-        return "Bot is running."
-
-    def run_flask():
-        app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
-
-    if __name__ == "__main__":
-        flask_thread = Thread(target=run_flask)
-        flask_thread.start()
-        bot.run(TOKEN)
+if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.create_task(
+        app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))))
+    loop.run_until_complete(main())
