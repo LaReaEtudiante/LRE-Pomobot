@@ -1,47 +1,38 @@
 import os
 import discord
 from dotenv import load_dotenv
-from discord.ext import commands
+from discord.ext import commands, tasks
 import configparser
 import asyncio
 from enum import Enum
 from database import ajouter_temps, recuperer_temps, classement_top10
-from timer import Timer, TimerStatus
+#from timer import Timer, TimerStatus # Plus besoin de Timer ou TimerStatus
 from keep_alive import keep_alive
+import logging  # Import du module logging
 
-DEBUG = True  # For debug messages
-SETTING_OPTIONS = [
-    'work_time', 'short_break_time', 'long_break_time', 'sessions',
-    'use_long_breaks'
-]
-COMMAND_PREFIX = '*'
-TIMER_COMMANDS = [
-    'start', 'pause', 'stop', 'time', 'notify', 'set', 'setextra',
-    'togglebreak'
-]
-GENERAL_COMMANDS = ['reset', 'help']
+DEBUG = True
+MAINTENANCE_MODE = False  # Variable pour le mode maintenance
+POMODORO_ROLE_NAME = "50-10"
+PARTICIPANTS = []  # Liste des IDs des participants au Pomodoro
 
 load_dotenv()
 intents = discord.Intents.default()
 intents.message_content = True
-TOKEN = os.getenv('DISCORD_TOKEN')  # Grabs Discord bot token from .env file
-bot = commands.Bot(command_prefix=COMMAND_PREFIX,
+TOKEN = os.getenv('DISCORD_TOKEN')
+bot = commands.Bot(command_prefix="*",
                    help_command=None,
                    intents=intents)
-timer = Timer()
-pingList = []
 
-# ------------ Overall Work List ---------
-# TODO: Complete remaining commands
-# TODO: Complete all error handling
-# TODO: Store user-set times
-# TODO: Add break functionality + settings to adjust long breaks, sessions
-# TODO: Add docstrings
-# TODO: Create empty .env file before finalizing
-# TODO: Remove all DEBUG statements and check imports before finalizing
+# Configuration du logging
+logger = logging.getLogger('pomodoro_bot')
+logger.setLevel(logging.DEBUG)
+fh = logging.FileHandler('pomodoro_bot.log', encoding='utf-8')
+fh_formatter = logging.Formatter(
+    '%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+fh.setFormatter(fh_formatter)
+logger.addHandler(fh)
 
 
-# TODO: Update Enum with more colors
 class MsgColors(Enum):
     AQUA = 0x33c6bb
     YELLOW = 0xFFD966
@@ -49,298 +40,183 @@ class MsgColors(Enum):
     PURPLE = 0x6040b1
 
 
+def is_admin():
+    async def predicate(ctx):
+        return ctx.message.author.guild_permissions.administrator
+    return commands.check(predicate)
+
+
+def check_maintenance_mode():  # Décorateur pour le mode maintenance
+    async def predicate(ctx):
+        if MAINTENANCE_MODE and ctx.command.name != 'maintenance':
+            raise commands.CommandError("Bot en mode maintenance.")
+        return True
+    return commands.check(predicate)
+
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} est connecté à Discord.')
+    logger.info(f'{bot.user} est connecté à Discord.')  # Log au démarrage
+    pomodoro_loop.start()  # Démarrer la boucle Pomodoro
 
 
 @bot.event
 async def on_message(message):
-    print(f"Message reçu : {message.content}")
-
-    await bot.process_commands(
-        message)  # TRÈS important pour que les commandes fonctionnent !!
+    await bot.process_commands(message)
 
 
-@bot.command(
-    name='start',
-    help='Démarre un minuteur Pomodoro ou le reprend si il est en pause')
-async def start_timer(ctx):
-    if timer.get_status() == TimerStatus.STOPPED:
-        work_mins = config['CURRENT_SETTINGS'][
-            'work_time']  # Grabs work duration from user settings
-        work_secs = '00'
-        desc = f'Temps restant: `{work_mins}:{work_secs}`'  # Formats message to be sent
-
-        em = discord.Embed(title=':timer: Démarrage du minuteur',
-                           description=desc,
-                           color=MsgColors.AQUA.value)
-        await ctx.send(embed=em)
-        if DEBUG:
-            print('Commande: *start (depuis arrêté)')
-
-        work_time = int(work_mins) * 60  # Multiplied by 60 to get seconds
-        timer.start(work_time)
-        while timer.get_status() == TimerStatus.RUNNING:
-            await asyncio.sleep(1)  # Sleep for 1 sec before timer counts down
-            timer.tick()
-        if timer.get_status(
-        ) == TimerStatus.STOPPED:  # Ping users when timer stops
-            ajouter_temps(ctx.author.id, ctx.guild.id,
-                          int(config['CURRENT_SETTINGS']['work_time']))
-            for user in pingList:
-                await ctx.send(f'Pinging {user}')
-            pingList.clear()
-
-    elif timer.get_status(
-    ) == TimerStatus.PAUSED:  # Resuming timer from paused state
-        em = discord.Embed(title=':timer: Reprise du minuteur',
-                           description=getFrmtTime(timer),
-                           color=MsgColors.AQUA.value)
-        await ctx.send(embed=em)
-        if DEBUG:
-            print('Commande: *start (depuis pause)')
-
-        timer.resume()
-        while timer.get_status() == TimerStatus.RUNNING:
-            await asyncio.sleep(1)
-            timer.tick()
-        if timer.get_status(
-        ) == TimerStatus.STOPPED:  # Ping users when timer stops
-            ajouter_temps(ctx.author.id, ctx.guild.id,
-                          int(config['CURRENT_SETTINGS']['work_time']))
-            for user in pingList:
-                await ctx.send(f'Pinging {user}')
-            pingList.clear()
+@bot.command(name='maintenance', help='Active/désactive le mode maintenance (admin only)')
+@is_admin()
+async def maintenance(ctx):
+    global MAINTENANCE_MODE
+    MAINTENANCE_MODE = not MAINTENANCE_MODE
+    if MAINTENANCE_MODE:
+        await ctx.send("Bot en mode maintenance. Les commandes sont désactivées.")
+        logger.warning("Bot mis en mode maintenance.")
     else:
-        em = discord.Embed(title=':warning: Attention',
-                           description='Le minuteur est déjà en cours.',
-                           color=MsgColors.YELLOW.value)
-        await ctx.send(embed=em)
+        await ctx.send("Bot en mode normal. Les commandes sont activées.")
+        logger.info("Bot sorti du mode maintenance.")
 
 
-@bot.command(name='pause', help='Met en pause le minuteur')
-async def pause_timer(ctx):
-    if not timer.pause():
-        em = discord.Embed(
-            title=':warning: Attention',
-            description='Le minuteur est déjà en pause ou arrêté.',
-            color=MsgColors.YELLOW.value)
+@bot.command(name='join', help='Rejoindre le Pomodoro')
+@check_maintenance_mode()
+async def join_pomodoro(ctx):
+    global PARTICIPANTS
+    user = ctx.author
+    if user.id not in PARTICIPANTS:
+        PARTICIPANTS.append(user.id)
+        # Gestion du rôle "50-10"
+        role = discord.utils.get(ctx.guild.roles, name=POMODORO_ROLE_NAME)
+        if role is None:
+            role = await ctx.guild.create_role(name=POMODORO_ROLE_NAME)
+            await ctx.send(f"Rôle '{POMODORO_ROLE_NAME}' créé.")
+            logger.info(f"Rôle '{POMODORO_ROLE_NAME}' créé.")
+        await user.add_role(role)
+        await ctx.send(f"{user.mention} a rejoint le Pomodoro.")
+        logger.info(f"{user.name} a rejoint le Pomodoro.")
     else:
-        em = discord.Embed(title=':pause_button: Minuteur en pause',
-                           description='Le minuteur est en pause.\n' +
-                           getFrmtTime(timer),
-                           color=MsgColors.AQUA.value)
-    await ctx.send(embed=em)
+        await ctx.send(f"{user.mention} est déjà dans le Pomodoro.")
 
 
-@bot.command(name='stop', help='Arrête le minuteur')
-async def stop_timer(ctx):
-    if not timer.stop():
-        em = discord.Embed(
-            title=':warning: Attention',
-            description='Le minuteur est déjà arrêté ou en pause.',
-            color=MsgColors.YELLOW.value)
+@bot.command(name='leave', help='Quitter le Pomodoro')
+@check_maintenance_mode()
+async def leave_pomodoro(ctx):
+    global PARTICIPANTS
+    user = ctx.author
+    if user.id in PARTICIPANTS:
+        PARTICIPANTS.remove(user.id)
+        # Retirer le rôle "50-10"
+        role = discord.utils.get(ctx.guild.roles, name=POMODORO_ROLE_NAME)
+        if role is not None:
+            await user.remove_role(role)
+        await ctx.send(f"{user.mention} a quitté le Pomodoro.")
+        logger.info(f"{user.name} a quitté le Pomodoro.")
     else:
-        em = discord.Embed(title=':stop_button: Minuteur arrêté',
-                           description='Le minuteur a été arrêté.',
-                           color=MsgColors.RED.value)
-        pingList.clear()  # Clear ping list when timer stops
-    await ctx.send(embed=em)
-
-
-@bot.command(name='time',
-             help='Affiche l\'état actuel du minuteur',
-             aliases=['timer', 'status'])
-async def current_time(ctx):
-    status = timer.get_status()
-    if status == TimerStatus.STOPPED:
-        em = discord.Embed(title=':stop_button: Minuteur arrêté',
-                           description='Temps restant : 0:00',
-                           color=MsgColors.RED.value)
-    elif status == TimerStatus.RUNNING:
-        em = discord.Embed(title=':timer: Minuteur en cours',
-                           description=getFrmtTime(timer),
-                           color=MsgColors.AQUA.value)
-    else:
-        em = discord.Embed(title=':pause_button: Minuteur en pause',
-                           description=getFrmtTime(timer),
-                           color=MsgColors.YELLOW.value)
-    await ctx.send(embed=em)
-
-
-@bot.command(name='notify', help='Te prévient à la fin du minuteur')
-async def notify_user(ctx):
-    em = discord.Embed(title=':ballot_box_with_check: Notification activée',
-                       description='Le minuteur mentionnera ' +
-                       ctx.message.author.name + ' à la fin du décompte.',
-                       color=MsgColors.AQUA.value)
-    pingList.append(ctx.message.author.mention)
-    await ctx.send(embed=em)
-
-
-@bot.command(name='set', help='Définit la durée de travail et de pause courte')
-async def set_options_simple(ctx, work_time: int, short_break_time: int):
-    config.set('CURRENT_SETTINGS', 'work_time', str(work_time))
-    config.set('CURRENT_SETTINGS', 'short_break_time', str(short_break_time))
-    with open('settings.ini', 'w') as configFile:
-        config.write(configFile)
-
-    em = discord.Embed(
-        title=':gear: Réglage du minuteur',
-        description=
-        f'Temps de travail défini à {work_time} min et pause courte à {short_break_time} min',
-        color=MsgColors.AQUA.value)
-    await ctx.send(embed=em)
-
-    if DEBUG:
-        print(
-            f'Command: *set: Work Time: {work_time} Break Time: {short_break_time}'
-        )
-
-
-@bot.command(name='setextra',
-             help='Définit la durée de travail et de longue pause')
-async def set_options_extra(ctx, long_break_time: int, sessions: int):
-    config.set('CURRENT_SETTINGS', 'long_break_time', str(long_break_time))
-    config.set('CURRENT_SETTINGS', 'sessions', str(sessions))
-    with open('settings.ini', 'w') as configFile:
-        config.write(configFile)
-
-    em = discord.Embed(
-        title=':gear: Réglage du minuteur',
-        description=
-        f'Longue pause réglée à {long_break_time} minutes et nombre de sessions de travail à {sessions}.',
-        color=MsgColors.AQUA.value)
-    await ctx.send(embed=em)
-
-
-@bot.command(name='togglebreak',
-             help='Activer ou désactiver les longues pauses')
-async def toggle_long_break(ctx):
-    break_option = config['CURRENT_SETTINGS']['use_long_breaks'] == 'True'
-    config.set('CURRENT_SETTINGS', 'use_long_breaks', str(not break_option))
-    with open('settings.ini', 'w') as configFile:
-        config.write(configFile)
-
-    if break_option:
-        desc = 'Les longues pauses ont été désactivées.'
-    else:
-        desc = 'Les longues pauses ont été activées.'
-    em = discord.Embed(title=':gear: Réglage du minuteur',
-                       description=desc,
-                       color=MsgColors.AQUA.value)
-    await ctx.send(embed=em)
+        await ctx.send(f"{user.mention} n'est pas dans le Pomodoro.")
 
 
 @bot.command(name='leaderboard', help='Affiche le classement du serveur')
+@check_maintenance_mode()
 async def leaderboard(ctx):
     top10 = classement_top10(ctx.guild.id)
     user_time = recuperer_temps(ctx.author.id, ctx.guild.id)
-
     description = ''
     for index, (user_id, total_minutes) in enumerate(top10, start=1):
         user = await bot.fetch_user(user_id)
         description += f'**#{index}** {user.name} : {total_minutes} minutes\n'
-
     if ctx.author.id not in [u[0] for u in top10]:
         description += f'\n**Ton temps personnel** : {user_time} minutes'
-
     embed = discord.Embed(title="🏆 Leaderboard Pomodoro",
                           description=description,
                           color=MsgColors.PURPLE.value)
     await ctx.send(embed=embed)
 
 
-@bot.command(name='reset', help='Réinitialiser les paramètres du minuteur')
-async def reset_settings(ctx):
-    for option in SETTING_OPTIONS:
-        config.set('CURRENT_SETTINGS', option, config['DEFAULT'][option])
-    with open('settings.ini', 'w') as configFile:
-        config.write(configFile)
-    em = discord.Embed(
-        title=':leftwards_arrow_with_hook: Reset Timer Settings',
-        description=
-        'Les paramètres du minuteur ont été réinitialisés aux valeurs par défaut.',
-        color=MsgColors.AQUA.value)
-    await ctx.send(embed=em)
-
-
 @bot.command(name='help', help='Décrit toutes les commandes du bot.')
+@check_maintenance_mode()
 async def help(ctx):
-    help_commands = dict()  # Dict of help commands + their description
+    help_commands = dict()
     for command in bot.commands:
         help_commands[command.name] = command.help
 
-    desc = 'Le préfixe pour ce bot est `' + COMMAND_PREFIX + '`\n'  # Prints ordered list of timer commands
-    desc += f'\n**Commandes du minuteur | {len(TIMER_COMMANDS)}**\n'
-    for command in TIMER_COMMANDS:
-        desc += '`{:12s}` {}\n'.format(command, help_commands.get(command, ''))
+    desc = 'Le préfixe pour ce bot est `' + COMMAND_PREFIX + '`\n'
+    desc += '\n**Commandes Pomodoro**\n'
+    desc += '`{:12s}` {}\n'.format('join', help_commands.get('join', ''))
+    desc += '`{:12s}` {}\n'.format('leave', help_commands.get('leave', ''))
 
-    desc += f'\n**Commandes générales | {len(GENERAL_COMMANDS)}**\n'  # Prints ordered list of general commands
-    for command in GENERAL_COMMANDS:
-        desc += '`{:12s}` {}\n'.format(command, help_commands.get(command, ''))
+    desc += '\n**Commandes générales**\n'
+    desc += '`{:12s}` {}\n'.format('help', help_commands.get('help', ''))
+    desc += '`{:12s}` {}\n'.format('leaderboard', help_commands.get('leaderboard', ''))
+    desc += '`{:12s}` {}\n'.format('maintenance', help_commands.get('maintenance', ''))
 
-    # ➔ Ici on ajoute le leaderboard
-    desc += '\n**Autres Commandes**\n'
-    desc += '`{:12s}` {}\n'.format(
-        'leaderboard',
-        help_commands.get('leaderboard', 'Affiche le classement du serveur'))
-
-    em = discord.Embed(title='Commandes du Bot',
+    embed = discord.Embed(title='Commandes du Bot',
                        description=desc,
                        color=MsgColors.PURPLE.value)
-    await ctx.send(embed=em)
+    await ctx.send(embed=embed)
 
 
-# TODO: Remove command later
-@bot.command(name='t', help='Temporary for testing commands')
-async def t(ctx):
-    await ctx.send(config['CURRENT_SETTINGS']['use_long_breaks'])
+@bot.command(name='set_pomodoro', help='Définit les temps du Pomodoro (admin only)')
+@is_admin()
+@check_maintenance_mode()
+async def set_pomodoro(ctx, work_time: int, break_time: int):
+    config.set('CURRENT_SETTINGS', 'work_time', str(work_time))
+    config.set('CURRENT_SETTINGS', 'break_time', str(break_time))
+    with open('settings.ini', 'w') as configFile:
+        config.write(configFile)
+    await ctx.send(f"Pomodoro réglé sur {work_time} minutes de travail et {break_time} minutes de pause.")
+    logger.info(f"Pomodoro réglé sur {work_time} minutes de travail et {break_time} minutes de pause.")
+
+
+@tasks.loop(minutes=1)  # La boucle tourne toutes les minutes
+async def pomodoro_loop():
+    work_time = int(config['CURRENT_SETTINGS']['work_time'])
+    break_time = int(config['CURRENT_SETTINGS']['break_time'])
+    channel = bot.get_channel(1199346210421295177)  # ID du canal où envoyer les messages
+    if channel is not None:
+        await channel.send(f"Début de la session de travail ({work_time} minutes) ! {get_role_mention(channel.guild)}")
+        logger.info(f"Début de la session de travail ({work_time} minutes).")
+        for minute in range(work_time):
+            await asyncio.sleep(60)  # Attendre une minute
+            if minute % 5 == 0:
+                remaining = work_time - minute - 1
+                await channel.send(f"{remaining} minutes restantes.")
+        await channel.send(f"Début de la pause ({break_time} minutes) ! {get_role_mention(channel.guild)}")
+        logger.info(f"Début de la pause ({break_time} minutes).")
+        for _ in range(break_time):
+            await asyncio.sleep(60)  # Attendre une minute
+        if PARTICIPANTS:  # Ajouter le temps de travail à chaque participant
+            for user_id in PARTICIPANTS:
+                ajouter_temps(user_id, channel.guild.id, work_time)
+            logger.info(f"Temps de travail ajouté aux participants : {PARTICIPANTS}")
+        else:
+            await channel.send("Aucun participant à cette session.")
+            logger.info("Aucun participant à cette session.")
+
+
+def get_role_mention(guild: discord.Guild):
+    role = discord.utils.get(guild.roles, name=POMODORO_ROLE_NAME)
+    if role:
+        return role.mention
+    return "@everyone"  # Retourner @everyone si le rôle n'existe pas (au cas où)
 
 
 # ----------------------- ERROR HANDLING -----------------------------
-# TODO: Fill in remaining method errors
-@set_options_simple.error
-async def set_options_simple_error(ctx, error):
-    if DEBUG:
-        print(f'*set error: {ctx.message.content} \n{ctx.message}\n')
-    if isinstance(error, commands.errors.MissingRequiredArgument):
-        em = discord.Embed(
-            title=':warning: Utilisation invalide de la commande *set',
-            description=
-            'Spécifiez une durée de travail et de pause valide.\nFormat : `*set # #`',
-            color=MsgColors.YELLOW.value)
-    elif isinstance(error, commands.errors.BadArgument):
-        em = discord.Embed(
-            title=':warning: Utilisation invalide de la commande *set',
-            description=
-            'Spécifiez des nombres entiers pour les temps de travail et de pause.\nFormat : `*set # #`',
-            color=MsgColors.YELLOW.value)
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandError) and str(error) == "Bot en mode maintenance.":
+        await ctx.send("Le bot est actuellement en mode maintenance. Veuillez réessayer plus tard.")
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send("Argument manquant. Veuillez vérifier la commande.")
+    elif isinstance(error, commands.errors.CheckFailure):
+        await ctx.send("Vous n'avez pas la permission d'utiliser cette commande.")
     else:
-        em = discord.Embed(
-            title=':x: Erreur inconnue lors de l\'utilisation de *set',
-            description=f'Une erreur inconnue a été enregistrée.',
-            color=MsgColors.RED.value)
-        with open('error.log', 'a') as errorLog:
-            errorLog.write(
-                f'Unhandled *set message: {ctx.message.content} \n{ctx.message}\n'
-            )
-    await ctx.send(embed=em)
-
-
-# ----------------------- UTILITY FUNCTIONS -----------------------------
-def getFrmtTime(clock: Timer):
-    work_secs = clock.get_time() % 60
-    work_mins = int((clock.get_time() - work_secs) / 60)
-    if work_secs < 10:  # Formats seconds if <10 seconds left
-        work_secs = '0' + str(work_secs)
-
-    return f'Temps restant: `{work_mins}:{work_secs}`'
+        await ctx.send(f"Une erreur est survenue : {error}")
+        logger.error(f"Erreur lors de l'exécution de la commande : {error}")
 
 
 if __name__ == '__main__':
     config = configparser.ConfigParser()
-    config.read('settings.ini')  # Read in settings from settings.ini
+    config.read('settings.ini')
     keep_alive()
     bot.run(TOKEN)
