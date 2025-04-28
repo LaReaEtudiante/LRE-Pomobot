@@ -38,12 +38,3 @@ async def remove_role(member, mode):
     role = discord.utils.get(member.guild.roles, name=role_name)
     if role:
         await member.remove_roles(role)
-
-
-async def send_to_pomodoro_channel(bot, embed):
-    """Envoyer un message dans le salon Pomodoro."""
-    channel = bot.get_channel(POMODORO_CHANNEL_ID)
-    if channel:
-        await channel.send(embed=embed)
-    else:
-        print(f"Erreur: Salon Pomodoro {POMODORO_CHANNEL_ID} non trouvé.")

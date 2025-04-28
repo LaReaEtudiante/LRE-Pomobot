@@ -3,8 +3,8 @@ import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
-from role_manager import setup_roles  # Garde uniquement setup_roles
-from session_manager import join_session, leave_session
+from role_manager import RoleManager
+from session_manager import SessionManager
 from database import Database
 from timer import TimerSession
 from flask import Flask
@@ -27,9 +27,11 @@ intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix='*', intents=intents)
 
-# Initialisation de la base de données et des timers
+# Initialisation des composants
+role_manager = RoleManager()
+session_manager = SessionManager()
 db = Database()
-timer_session = TimerSession(db)
+timer_session = TimerSession("default_session", 50, 10)  # Initialisation corrigée
 
 # Flask pour Render
 app = Flask(__name__)
@@ -50,7 +52,6 @@ async def send_embed(ctx, title, description, color=discord.Color.blue()):
 @bot.event
 async def on_ready():
     print(f'{bot.user} est connecté.')
-    await setup_roles(bot)  # Initialise les rôles au démarrage
 
 
 # Commandes pour tous
@@ -107,7 +108,17 @@ async def join(ctx, mode: str = None):
                          discord.Color.red())
         return
 
-    await join_session(bot, ctx, mode)  # Utilise session_manager
+    mode = mode.lower()
+    if mode in ["50-10", "a"]:
+        await role_manager.add_role(ctx.author, "50-10")
+        await send_embed(ctx, "Succès", "Vous avez rejoint la session 50-10.")
+    elif mode in ["25-5", "b"]:
+        await role_manager.add_role(ctx.author, "25-5")
+        await send_embed(ctx, "Succès", "Vous avez rejoint la session 25-5.")
+    else:
+        await send_embed(ctx, "Erreur",
+                         "Mode invalide. Choisissez A (50-10) ou B (25-5).",
+                         discord.Color.red())
 
 
 @bot.command()
@@ -118,7 +129,8 @@ async def leave(ctx):
         )
         return
 
-    await leave_session(bot, ctx)  # Utilise session_manager
+    await role_manager.remove_roles(ctx.author)
+    await send_embed(ctx, "Succès", "Vous avez quitté votre session.")
 
 
 @bot.command()
