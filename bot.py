@@ -17,6 +17,9 @@ SESSION_ACTIVE = False
 SESSION_PHASE = None  # 'work' or 'break'
 SESSION_END = None
 
+# Liste des IDs des participants au Pomodoro
+PARTICIPANTS = []
+
 # Charger configuration
 config = configparser.ConfigParser()
 config.read('settings.ini')
@@ -36,8 +39,7 @@ bot = commands.Bot(command_prefix=prefix, help_command=None, intents=intents)
 logger = logging.getLogger('pomodoro_bot')
 logger.setLevel(logging.DEBUG)
 fh = logging.FileHandler('pomodoro_bot.log', encoding='utf-8')
-fmt = '%(asctime)s - %(levelname)s - %(message)s'
-fh.setFormatter(logging.Formatter(fmt, datefmt='%Y-%m-%d %H:%M:%S'))
+fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 logger.addHandler(fh)
 
 # Colors
@@ -60,7 +62,7 @@ def check_maintenance_mode():
         return True
     return commands.check(predicate)
 
-# Ensure role exists
+# Ensure role exists and return mention
 async def get_role_mention(guild: discord.Guild) -> str:
     role = discord.utils.get(guild.roles, name=POMODORO_ROLE_NAME)
     if role is None:
@@ -70,27 +72,23 @@ async def get_role_mention(guild: discord.Guild) -> str:
 
 # -------------------- EVENTS --------------------
 @bot.event
-async def on_ready():
-    logger.info(f'{bot.user} connecté.')
-    # démarrer la boucle Pomodoro si pas déjà
-    if not pomodoro_loop.is_running():
-        pomodoro_loop.start()
-
-@bot.event
-async def on_message(message):
-    await bot.process_commands(message)
-
-@bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandError) and str(error) == "Bot en mode maintenance.":
-        await ctx.send("Le bot est en maintenance.")
+    # Commande non trouvée
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send(f"Commande inconnue. Tapez `{prefix}help` pour voir la liste des commandes.")
+    # Mode maintenance
+    elif isinstance(error, commands.CommandError) and str(error) == "Bot en mode maintenance.":
+        await ctx.send("Le bot est actuellement en maintenance. Veuillez réessayer plus tard.")
+    # Argument manquant
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("Argument manquant.")
-    elif isinstance(error, commands.errors.CheckFailure):
-        await ctx.send("Permission refusée.")
+        await ctx.send("Argument manquant. Veuillez vérifier la commande.")
+    # Permissions insuffisantes
+    elif isinstance(error, commands.CheckFailure):
+        await ctx.send("Vous n'avez pas la permission d'utiliser cette commande.")
+    # Autres erreurs inattendues
     else:
-        await ctx.send(f"Erreur : {error}")
-        logger.error(f"Erreur cmd : {error}")
+        await ctx.send(f"Une erreur inattendue est survenue : {error}")
+        logger.error(f"Erreur lors de l'exécution de la commande : {error}")
 
 # -------------------- COMMANDS --------------------
 @bot.command(name='maintenance', help='Activer/désactiver maintenance')
@@ -101,6 +99,31 @@ async def maintenance(ctx):
     state = 'maintenance' if MAINTENANCE_MODE else 'normal'
     await ctx.send(f"Mode {state}.")
 
+@bot.command(name='join', help='Rejoindre le Pomodoro')
+@check_maintenance_mode()
+async def join(ctx):
+    user = ctx.author
+    if user.id not in PARTICIPANTS:
+        PARTICIPANTS.append(user.id)
+        mention = await get_role_mention(ctx.guild)
+        await user.add_roles(discord.utils.get(ctx.guild.roles, name=POMODORO_ROLE_NAME))
+        await ctx.send(f"{user.mention} a rejoint le Pomodoro.")
+    else:
+        await ctx.send(f"{user.mention} est déjà inscrit.")
+
+@bot.command(name='leave', help='Quitter le Pomodoro')
+@check_maintenance_mode()
+async def leave(ctx):
+    user = ctx.author
+    if user.id in PARTICIPANTS:
+        PARTICIPANTS.remove(user.id)
+        role = discord.utils.get(ctx.guild.roles, name=POMODORO_ROLE_NAME)
+        if role:
+            await user.remove_roles(role)
+        await ctx.send(f"{user.mention} a quitté le Pomodoro.")
+    else:
+        await ctx.send(f"{user.mention} n'était pas inscrit.")
+
 @bot.command(name='time', help='Temps restant de la session en cours')
 @check_maintenance_mode()
 async def time_left(ctx):
@@ -108,17 +131,14 @@ async def time_left(ctx):
         return await ctx.send("Aucune session Pomodoro en cours.")
     now = datetime.now(timezone.utc)
     remaining = SESSION_END - now
-    if remaining.total_seconds() < 0:
-        return await ctx.send("Session en cours, calcul du temps restant…")
-    mins, secs = divmod(int(remaining.total_seconds()), 60)
+    mins, secs = divmod(max(int(remaining.total_seconds()),0), 60)
     phase = 'travail' if SESSION_PHASE == 'work' else 'pause'
     next_phase = 'pause' if SESSION_PHASE == 'work' else 'travail'
-    await ctx.send(
-        f"Vous êtes en session de {phase}. La {next_phase} commence dans {mins} min et {secs} sec.")
+    await ctx.send(f"Vous êtes en session de {phase}. La {next_phase} commence dans {mins} min et {secs} sec.")
 
 @bot.command(name='ping', help='Vérifie la latence du bot')
 async def ping(ctx):
-    await ctx.send(f"Pong ! Latence : {round(bot.latency*1000)} ms")
+    await ctx.send(f"Pong ! Latence : {round(bot.latency*1000)} ms")
 
 @bot.command(name='stats', help='Voir statistiques d’utilisation')
 @check_maintenance_mode()
@@ -126,16 +146,19 @@ async def stats(ctx):
     db = TinyDB('leaderboard.json')
     table = db.table(str(ctx.guild.id))
     users = table.all()
-    if not users:
-        return await ctx.send("Pas de données disponibles.")
-    total = sum(u['minutes'] for u in users)
+    total = sum(u['minutes'] for u in users) if users else 0
     count = len(users)
-    avg = total / count
+    avg = (total / count) if count else 0
     embed = discord.Embed(title="📊 Stats Pomodoro", color=MsgColors.AQUA.value)
     embed.add_field(name="Utilisateurs uniques", value=str(count))
     embed.add_field(name="Temps total (min)", value=str(total))
     embed.add_field(name="Moyenne par user", value=f"{avg:.1f} min")
     await ctx.send(embed=embed)
+
+@bot.command(name='help', help='Affiche ce message')
+async def help_cmd(ctx):
+    cmds = '\n'.join(f"**{c.name}**: {c.help or ''}" for c in bot.commands)
+    await ctx.send(embed=discord.Embed(title="Commandes disponibles", description=cmds, color=MsgColors.PURPLE.value))
 
 @bot.command(name='set_channel', help='Choisir canal Pomodoro (admin)')
 @is_admin()
@@ -161,8 +184,8 @@ async def pomodoro_loop():
     global SESSION_ACTIVE, SESSION_PHASE, SESSION_END
     work = int(config['CURRENT_SETTINGS']['work_time'])
     brk = int(config['CURRENT_SETTINGS']['break_time'])
-    cid = POMODORO_CHANNEL_ID or 1199346210421295177
-    channel = bot.get_channel(cid)
+    cid = POMODORO_CHANNEL_ID or None
+    channel = bot.get_channel(cid) if cid else None
     if not channel:
         return
     # Début session travail
@@ -170,24 +193,23 @@ async def pomodoro_loop():
     SESSION_PHASE = 'work'
     SESSION_END = datetime.now(timezone.utc) + timedelta(minutes=work)
     mention = await get_role_mention(channel.guild)
-    await channel.send(f"Début travail ({work} min) ! {mention}")
+    await channel.send(f"Début travail ({work} min) ! {mention}")
     for minute in range(work):
         await asyncio.sleep(60)
         if minute % 5 == 0:
             rem = work - minute - 1
-            await channel.send(f"{rem} minutes restantes.")
+            await channel.send(f"{rem} minutes restantes.")
     # Début session pause
     SESSION_PHASE = 'break'
     SESSION_END = datetime.now(timezone.utc) + timedelta(minutes=brk)
     mention = await get_role_mention(channel.guild)
-    await channel.send(f"Début pause ({brk} min) ! {mention}")
+    await channel.send(f"Début pause ({brk} min) ! {mention}")
     for _ in range(brk):
         await asyncio.sleep(60)
     # Enregistrer temps de travail
-    if SESSION_PHASE == 'break':
-        for uid in PARTICIPANTS:
-            ajouter_temps(uid, channel.guild.id, work)
-        logger.info(f"Temps ajouté pour participants: {PARTICIPANTS}")
+    for uid in PARTICIPANTS:
+        ajouter_temps(uid, channel.guild.id, work)
+    logger.info(f"Temps ajouté pour participants: {PARTICIPANTS}")
     SESSION_ACTIVE = False
 
 # -------------------- MAIN --------------------
