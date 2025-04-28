@@ -1,7 +1,7 @@
 name: Keep Render Service Alive
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:    # bouton “Run workflow”
   schedule:
     - cron: '*/5 * * * *'   # toutes les 5 minutes UTC
 
@@ -10,4 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Render Web Service
-        run: curl -fsS https://lre-pomobot.onrender.com/ || true
+        run: |
+          echo "⏱️ Pinging at $(date)"
+          curl --retry 5 --retry-delay 10 --retry-connrefused -fSs https://lre-pomobot.onrender.com/ || true
