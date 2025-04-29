@@ -9,6 +9,7 @@ from keep_alive import keep_alive
 import logging
 from tinydb import TinyDB
 from datetime import datetime, timezone, timedelta
+import pytz
 
 # -- CONFIGURATION & GLOBALS --
 config = configparser.ConfigParser()
@@ -78,22 +79,6 @@ async def ensure_role(guild: discord.Guild, name: str) -> discord.Role:
         logger.info(f"Rôle '{name}' créé dans '{guild.name}'")
     return role
 
-# Formatage adaptatif d'une durée en secondes
-def format_duration(seconds: int) -> str:
-    parts = []
-    days, rem = divmod(seconds, 86400)
-    if days:
-        parts.append(f"{days} j")
-    hours, rem = divmod(rem, 3600)
-    if hours or days:
-        parts.append(f"{hours} h")
-    minutes, secs = divmod(rem, 60)
-    if minutes or hours or days:
-        parts.append(f"{minutes} min")
-    if secs or not parts:
-        parts.append(f"{secs} s")
-    return " ".join(parts)
-
 # -------------------- ÉVÉNEMENTS --------------------
 @bot.event
 async def on_ready():
@@ -130,14 +115,13 @@ async def joinA(ctx):
     user=ctx.author
     if user.id in PARTICIPANTS_A|PARTICIPANTS_B:
         return await ctx.send(embed=discord.Embed(
-            description="Vous êtes déjà inscrit.", color=MsgColors.YELLOW.value
-        ))
+            description="Vous êtes déjà inscrit.", color=MsgColors.YELLOW.value))
     PARTICIPANTS_A.add(user.id)
     role = await ensure_role(ctx.guild, POMO_ROLE_A)
     await user.add_roles(role)
     await ctx.send(embed=discord.Embed(
-        description=f"{user.mention} a rejoint (mode A).", color=MsgColors.AQUA.value
-    ))
+        description=f"{user.mention} a rejoint (mode A – 50-10).",
+        color=MsgColors.AQUA.value))
 
 @bot.command(name='joinB', help='Rejoindre méthode B (25-5)')
 @check_maintenance()
@@ -145,14 +129,13 @@ async def joinB(ctx):
     user=ctx.author
     if user.id in PARTICIPANTS_A|PARTICIPANTS_B:
         return await ctx.send(embed=discord.Embed(
-            description="Vous êtes déjà inscrit.", color=MsgColors.YELLOW.value
-        ))
+            description="Vous êtes déjà inscrit.", color=MsgColors.YELLOW.value))
     PARTICIPANTS_B.add(user.id)
     role = await ensure_role(ctx.guild, POMO_ROLE_B)
     await user.add_roles(role)
     await ctx.send(embed=discord.Embed(
-        description=f"{user.mention} a rejoint (mode B).", color=MsgColors.AQUA.value
-    ))
+        description=f"{user.mention} a rejoint (mode B – 25-5).",
+        color=MsgColors.AQUA.value))
 
 @bot.command(name='leave', help='Quitter le Pomodoro')
 @check_maintenance()
@@ -173,48 +156,65 @@ async def leave(ctx):
         if role: await user.remove_roles(role)
     else:
         return await ctx.send(embed=discord.Embed(
-            description=f"{user.mention} n'était pas inscrit.", color=MsgColors.YELLOW.value
-        ))
+            description=f"{user.mention} n'était pas inscrit.",
+            color=MsgColors.YELLOW.value))
     await ctx.send(embed=discord.Embed(
-        description=f"{user.mention} a quitté. +{added} min ajoutées.", color=MsgColors.AQUA.value
-    ))
+        description=f"{user.mention} a quitté. +{added} min ajoutées.",
+        color=MsgColors.AQUA.value))
 
 @bot.command(name='time', help='Temps restant session')
 @check_maintenance()
 async def time_left(ctx):
     if not SESSION_ACTIVE or SESSION_PHASE is None:
         return await ctx.send(embed=discord.Embed(
-            description="Aucune session en cours.", color=MsgColors.YELLOW.value
-        ))
+            description="Aucune session en cours.",
+            color=MsgColors.YELLOW.value))
     now=datetime.now(timezone.utc)
     rem=SESSION_END-now
     secs=max(int(rem.total_seconds()),0)
     m,s=divmod(secs,60)
     phase='travail' if SESSION_PHASE=='work' else 'pause'
     nxt='pause' if SESSION_PHASE=='work' else 'travail'
-    e=discord.Embed(title=f"⏱️ Session {phase}", color=MsgColors.AQUA.value)
-    e.description = f"La {nxt} commence dans **{m}** min et **{s}** sec."
+    e=discord.Embed(
+        title=f"⏱️ Session {phase}",
+        description=f"La {nxt} commence dans **{m}** min et **{s}** sec.",
+        color=MsgColors.AQUA.value
+    )
     await ctx.send(embed=e)
 
-@bot.command(name='ping', help='Latence du bot')
-async def ping(ctx):
-    e=discord.Embed(title="🏓 Pong !", description=f"Latence : **{round(bot.latency*1000)}** ms", color=MsgColors.AQUA.value)
+# nouvelle commande status
+@bot.command(name='status', help='Afficher latence et état du bot')
+async def status(ctx):
+    # latence
+    latency = round(bot.latency * 1000)
+    # heure locale de Lausanne
+    now_utc = datetime.now(timezone.utc)
+    lausanne = now_utc.astimezone(pytz.timezone('Europe/Zurich'))
+    # session active ?
+    if SESSION_ACTIVE and SESSION_END:
+        rem = max(int((SESSION_END - now_utc).total_seconds()),0)
+        m, s = divmod(rem, 60)
+        sess = f"{SESSION_PHASE} dans {m} min {s} sec"
+    else:
+        sess = "aucune session active"
+    e = discord.Embed(title="🔍 État du bot", color=MsgColors.PURPLE.value)
+    e.add_field(name="Latence", value=f"{latency} ms", inline=True)
+    e.add_field(name="Heure (Lausanne)", value=lausanne.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
+    e.add_field(name="Session", value=sess, inline=False)
     await ctx.send(embed=e)
 
-@bot.command(name='stats', help='Vos stats détaillées')
+# -------------------- COMMANDES COMMUNES --------------------
+@bot.command(name='stats', help='Vos stats')
 @check_maintenance()
 async def stats(ctx):
-    table = TinyDB('leaderboard.json').table(str(ctx.guild.id))
-    total_a = sum(u['minutes'] for u in table.all() if u.get('mode')=='A')
-    total_b = sum(u['minutes'] for u in table.all() if u.get('mode')=='B')
-    total_all = total_a + total_b
-    users = len({u['user_id'] for u in table.all()})
-
+    db=TinyDB('leaderboard.json').table(str(ctx.guild.id))
+    total=sum(u['minutes'] for u in db.all())
+    users=len(db.all())
+    avg=(total/users if users else 0)
     e=discord.Embed(title="📊 Stats Pomodoro", color=MsgColors.AQUA.value)
-    e.add_field(name="Temps total A", value=format_duration(total_a*60), inline=False)
-    e.add_field(name="Temps total B", value=format_duration(total_b*60), inline=False)
-    e.add_field(name="Total cumulé", value=format_duration(total_all*60), inline=False)
     e.add_field(name="Utilisateurs uniques", value=str(users), inline=False)
+    e.add_field(name="Temps total (min)",      value=str(total), inline=False)
+    e.add_field(name="Moyenne par utilisateur",value=f"{avg:.1f}", inline=False)
     await ctx.send(embed=e)
 
 @bot.command(name='leaderboard', help='Top 5 général')
@@ -227,7 +227,7 @@ async def leaderboard(ctx):
     else:
         for i,(uid,m) in enumerate(top,1):
             user=await bot.fetch_user(uid)
-            e.add_field(name=f"#{i} {user.name}", value=f"{format_duration(m*60)}", inline=False)
+            e.add_field(name=f"#{i} {user.name}", value=f"{m} min", inline=False)
     await ctx.send(embed=e)
 
 # -------------------- COMMANDES ADMIN --------------------
@@ -250,8 +250,8 @@ async def set_channel(ctx, channel: discord.TextChannel):
     global POMODORO_CHANNEL_ID
     POMODORO_CHANNEL_ID=channel.id
     await ctx.send(embed=discord.Embed(
-        description=f"Canal défini sur {channel.mention}", color=MsgColors.AQUA.value
-    ))
+        description=f"Canal défini sur {channel.mention}",
+        color=MsgColors.AQUA.value))
 
 @bot.command(name='set_role_A', help='Définir rôle A (admin)')
 @is_admin()
@@ -261,8 +261,8 @@ async def set_role_A(ctx, role: discord.Role):
     global POMO_ROLE_A
     POMO_ROLE_A=role.name
     await ctx.send(embed=discord.Embed(
-        description=f"Rôle A défini sur {role.mention}", color=MsgColors.AQUA.value
-    ))
+        description=f"Rôle A défini sur {role.mention}",
+        color=MsgColors.AQUA.value))
 
 @bot.command(name='set_role_B', help='Définir rôle B (admin)')
 @is_admin()
@@ -272,34 +272,35 @@ async def set_role_B(ctx, role: discord.Role):
     global POMO_ROLE_B
     POMO_ROLE_B=role.name
     await ctx.send(embed=discord.Embed(
-        description=f"Rôle B défini sur {role.mention}", color=MsgColors.AQUA.value
-    ))
+        description=f"Rôle B défini sur {role.mention}",
+        color=MsgColors.AQUA.value))
 
 @bot.command(name='clear_stats', help='Réinitialiser toutes les stats')
 @is_admin()
 async def clear_stats(ctx):
     TinyDB('leaderboard.json').drop_table(str(ctx.guild.id))
     await ctx.send(embed=discord.Embed(
-        description="Statistiques réinitialisées.", color=MsgColors.YELLOW.value
-    ))
+        description="Statistiques réinitialisées.",
+        color=MsgColors.YELLOW.value))
 
 @bot.command(name='help', help='Affiche ce message')
 async def help_cmd(ctx):
     e=discord.Embed(title="🛠️ Commandes Pomodoro", color=MsgColors.PURPLE.value)
     e.add_field(name="Étudiant", value=(
-        "`joinA` – rejoindre A (50-10)\n"
-        "`joinB` – rejoindre B (25-5)\n"
-        "`leave` – quitter\n"
-        "`time` – temps restant\n"
-        "`stats` – vos stats détaillées\n"
-        "`leaderboard` – top 5\n"
+        "`joinA`      – rejoindre A (50-10)\n"
+        "`joinB`      – rejoindre B (25-5)\n"
+        "`leave`      – quitter\n"
+        "`time`       – temps restant\n"
+        "`status`     – état du bot\n"
+        "`stats`      – vos stats\n"
+        "`leaderboard`– top 5"
     ), inline=False)
     e.add_field(name="Admin", value=(
-        "`maintenance` – maintenance on/off\n"
+        "`maintenance` – on/off\n"
         "`set_channel` – définir canal\n"
-        "`set_role_A` – définir rôle A\n"
-        "`set_role_B` – définir rôle B\n"
-        "`clear_stats` – vider stats"
+        "`set_role_A`   – définir rôle A\n"
+        "`set_role_B`   – définir rôle B\n"
+        "`clear_stats`  – vider stats"
     ), inline=False)
     await ctx.send(embed=e)
 
@@ -322,7 +323,6 @@ async def pomodoro_loop():
         await asyncio.sleep(WORK_TIME_A*60)
         SESSION_PHASE='break'
         SESSION_END=datetime.now(timezone.utc)+timedelta(minutes=BREAK_TIME_A)
-        role_mention=(await ensure_role(channel.guild, POMO_ROLE_A)).mention
         await channel.send(f"Début pause (A, {BREAK_TIME_A} min) ! {role_mention}")
         await asyncio.sleep(BREAK_TIME_A*60)
         for uid in PARTICIPANTS_A:
@@ -338,7 +338,6 @@ async def pomodoro_loop():
         await asyncio.sleep(WORK_TIME_B*60)
         SESSION_PHASE='break'
         SESSION_END=datetime.now(timezone.utc)+timedelta(minutes=BREAK_TIME_B)
-        role_mention=(await ensure_role(channel.guild, POMO_ROLE_B)).mention
         await channel.send(f"Début pause (B, {BREAK_TIME_B} min) ! {role_mention}")
         await asyncio.sleep(BREAK_TIME_B*60)
         for uid in PARTICIPANTS_B:
