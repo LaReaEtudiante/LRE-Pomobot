@@ -1,11 +1,8 @@
-# database.py
-
 from tinydb import TinyDB, Query
 from datetime import datetime, timezone
 
 User = Query()
 
-# Fichiers TinyDB
 DB_STATS = TinyDB('leaderboard.json')
 DB_PART  = TinyDB('participants.json')
 
@@ -28,9 +25,7 @@ def classement_top10(guild_id: int):
 # — PARTICIPANTS — #
 
 def add_participant(user_id: int, guild_id: int, mode: str):
-    """
-    Enregistre un participant avec horodatage UTC et son mode ('A' ou 'B').
-    """
+    """Enregistre un participant avec horodatage UTC et son mode ('A' ou 'B')."""
     table = DB_PART.table(str(guild_id))
     now = datetime.now(timezone.utc).timestamp()
     rec = table.get(User.user_id == user_id)
@@ -40,9 +35,7 @@ def add_participant(user_id: int, guild_id: int, mode: str):
         table.insert({'user_id': user_id, 'join_time': now, 'mode': mode})
 
 def remove_participant(user_id: int, guild_id: int):
-    """
-    Supprime un participant et renvoie (join_time, mode) ou (None, None) s’il n’était pas inscrit.
-    """
+    """Supprime un participant et renvoie (join_time, mode) ou (None, None)."""
     table = DB_PART.table(str(guild_id))
     rec = table.get(User.user_id == user_id)
     if not rec:
@@ -53,8 +46,6 @@ def remove_participant(user_id: int, guild_id: int):
     return join_ts, mode
 
 def get_all_participants(guild_id: int):
-    """
-    Retourne la liste des (user_id, mode) inscrits pour un serveur.
-    """
+    """Retourne la liste des (user_id, mode) inscrits pour un serveur."""
     table = DB_PART.table(str(guild_id))
     return [(r['user_id'], r['mode']) for r in table.all()]

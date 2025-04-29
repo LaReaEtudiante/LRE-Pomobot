@@ -1,5 +1,3 @@
-# messages.py
-
 from enum import Enum
 
 class MsgColors(Enum):
@@ -105,9 +103,9 @@ STATUS = {
     "title": "🔍 État du bot",
     "color": MsgColors.PURPLE.value,
     "fields": [
-        {"name": "Latence",          "value_template": "{latency} ms",           "inline": True},
-        {"name": "Heure (Lausanne)", "value_template": "{local_time}",         "inline": True},
-        {"name": "Session",          "value_template": "{session_status}",   "inline": False}
+        {"name": "Latence",          "value_template": "{latency} ms",         "inline": True},
+        {"name": "Heure (Lausanne)", "value_template": "{local_time}",       "inline": True},
+        {"name": "Session",          "value_template": "{session_status}", "inline": False}
     ]
 }
 
