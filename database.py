@@ -1,4 +1,3 @@
-# database.py
 from tinydb import TinyDB, Query
 from datetime import datetime, timezone
 
@@ -32,7 +31,7 @@ def classement_top10(guild_id: int):
     users.sort(key=lambda x: x['minutes'], reverse=True)
     return [(u['user_id'], u['minutes']) for u in users[:10]]
 
-# ———————— PARTICIPANTS ————————
+# — PARTICIPANTS — #
 
 def add_participant(user_id: int, guild_id: int):
     """Enregistre un participant avec horodatage UTC"""
