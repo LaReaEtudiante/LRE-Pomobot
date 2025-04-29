@@ -26,12 +26,15 @@ POMO_ROLE_B     = config['CURRENT_SETTINGS'].get('pomodoro_role_B', fallback='25
 # Canal de publication
 POMODORO_CHANNEL_ID = config['CURRENT_SETTINGS'].getint('channel_id', fallback=None)
 
-# Préfixe et bot
+# Préfixe et intents
 PREFIX = config['CURRENT_SETTINGS'].get('prefix','*')
+intents = discord.Intents.default()
+intents.message_content = True
+
 bot = commands.Bot(
     command_prefix=PREFIX,
     help_command=None,
-    intents=discord.Intents.default(),
+    intents=intents,
     case_insensitive=True
 )
 
@@ -46,8 +49,9 @@ fh.setFormatter(logging.Formatter(
 logger.addHandler(fh)
 
 # États de session
+MAINTENANCE_MODE = False
 SESSION_ACTIVE = False
-SESSION_PHASE  = None  # 'work' or 'break'
+SESSION_PHASE  = None  # 'work' ou 'break'
 SESSION_END    = None
 PARTICIPANTS_A = set()
 PARTICIPANTS_B = set()
@@ -82,7 +86,6 @@ async def ensure_role(guild: discord.Guild, name: str) -> discord.Role:
 # -------------------- ÉVÉNEMENTS --------------------
 @bot.event
 async def on_ready():
-    global MAINTENANCE_MODE
     logger.info(f"{bot.user} connecté.")
     if not pomodoro_loop.is_running():
         pomodoro_loop.start()
@@ -200,7 +203,7 @@ async def status(ctx):
     e.add_field(name="Session", value=sess, inline=False)
     await ctx.send(embed=e)
 
-# -------------------- COMMANDES COMMUNES --------------------
+# -------------------- STATS & LEADERBOARD --------------------
 @bot.command(name='stats', help='Vos stats')
 @check_maintenance()
 async def stats(ctx):
@@ -228,16 +231,14 @@ async def leaderboard(ctx):
     await ctx.send(embed=e)
 
 # -------------------- COMMANDES ADMIN --------------------
-MAINTENANCE_MODE=False
-
 @bot.command(name='maintenance', help='Mode maintenance on/off')
 @is_admin()
 async def maintenance(ctx):
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = not MAINTENANCE_MODE
     state = "activée" if MAINTENANCE_MODE else "désactivée"
-    e = discord.Embed(title="🔧 Maintenance", description=state, color=MsgColors.YELLOW.value)
-    await ctx.send(embed=e)
+    await ctx.send(embed=discord.Embed(
+        title="🔧 Maintenance", description=state, color=MsgColors.YELLOW.value))
 
 @bot.command(name='set_channel', help='Choisir canal (admin)')
 @is_admin()
