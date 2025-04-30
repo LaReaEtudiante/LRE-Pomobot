@@ -13,24 +13,30 @@ HELP = {
     "title": "🛠️ Commandes Pomodoro",
     "color": MsgColors.PURPLE.value,
     "fields": [
-        {"name": "Étudiant",
-         "value": (
-             "`joinA`       – rejoindre A (50-10)\n"
-             "`joinB`       – rejoindre B (25-5)\n"
-             "`leave`       – quitter\n"
-             "`time`        – temps restant\n"
-             "`status`      – état du bot\n"
-             "`stats`       – vos stats\n"
-             "`leaderboard` – top 5"
-         ), "inline": False},
-        {"name": "Administrateur",
-         "value": (
-             "`maintenance` – on/off\n"
-             "`set_channel` – définir canal\n"
-             "`set_role_A`  – définir rôle A\n"
-             "`set_role_B`  – définir rôle B\n"
-             "`clear_stats` – vider stats"
-         ), "inline": False},
+        {
+            "name": "Étudiant",
+            "value": (
+                "`joinA`       – rejoindre A (50-10)\n"
+                "`joinB`       – rejoindre B (25-5)\n"
+                "`leave`       – quitter\n"
+                "`time`        – temps restant\n"
+                "`status`      – état du bot\n"
+                "`stats`       – vos stats\n"
+                "`leaderboard` – top 5"
+            ),
+            "inline": False
+        },
+        {
+            "name": "Administrateur",
+            "value": (
+                "`maintenance` – on/off\n"
+                "`set_channel` – définir canal\n"
+                "`set_role_A`  – définir rôle A\n"
+                "`set_role_B`  – définir rôle B\n"
+                "`clear_stats` – vider stats"
+            ),
+            "inline": False
+        }
     ]
 }
 
@@ -42,18 +48,18 @@ ERRORS = {
         "color": MsgColors.RED.value
     },
     "maintenance_active": {
-        "title": "⚠️ Mode Maintenance",
+        "title": "⚠️ Maintenance",
         "description_template": "Le bot est en maintenance.",
         "color": MsgColors.YELLOW.value
     },
     "missing_argument": {
         "title": "❗ Argument manquant",
-        "description_template": "Vérifiez la syntaxe de la commande.",
+        "description": "Vérifiez la syntaxe de la commande.",
         "color": MsgColors.RED.value
     },
     "permission_denied": {
         "title": "🚫 Permission refusée",
-        "description_template": "Vous n'avez pas les droits requis pour cette commande.",
+        "description": "Vous n'avez pas les droits requis pour cette commande.",
         "color": MsgColors.RED.value
     },
     "unexpected_error": {
@@ -66,15 +72,22 @@ ERRORS = {
 # ─── MAINTENANCE ─────────────────────────────────────────────────────────────
 MAINT_TOGGLE = {
     "title": "🔧 Mode Maintenance",
-    "description_template": "Mode maintenance {state}.",
-    "color": MsgColors.YELLOW.value
+    "color": MsgColors.YELLOW.value,
+    "description_template": "Mode maintenance {state}."
 }
 
 # ─── JOINDRE / QUITTER ────────────────────────────────────────────────────────
 JOIN = {
-    "A": {"description_template": "{user_mention} a rejoint (mode A – 50-10).", "color": MsgColors.AQUA.value},
-    "B": {"description_template": "{user_mention} a rejoint (mode B – 25-5).", "color": MsgColors.AQUA.value},
+    "A": {
+        "description_template": "{user_mention} a rejoint (mode A – 50-10).",
+        "color": MsgColors.AQUA.value
+    },
+    "B": {
+        "description_template": "{user_mention} a rejoint (mode B – 25-5).",
+        "color": MsgColors.AQUA.value
+    }
 }
+
 LEAVE = {
     "description_template": "{user_mention} a quitté. +{minutes} min ajoutées.",
     "color": MsgColors.AQUA.value
@@ -82,30 +95,35 @@ LEAVE = {
 
 # ─── TEMPS RESTANT ────────────────────────────────────────────────────────────
 TIME_LEFT = {
-    "title_template":       "⏱️ Session {phase}",
+    "title_template": "⏱️ Session {phase}",
     "description_template": "La {next_phase} commence dans **{minutes}** min et **{seconds}** sec.",
     "color": MsgColors.AQUA.value
 }
 
 # ─── STATUS ───────────────────────────────────────────────────────────────────
 STATUS = {
-    "title": MsgColors.PURPLE.value and "🔍 État du bot",  # le titre
+    "title": "🔍 État du bot",
     "color": MsgColors.PURPLE.value,
     "fields": [
         {"name": "Latence",          "value_template": "{latency} ms",           "inline": True},
-        {"name": "Heure (Lausanne)", "value_template": "{local_time}",            "inline": True},
-        {"name": "Session",          "value_template": "{session_status}",      "inline": False},
+        {"name": "Heure (Lausanne)", "value_template": "{local_time}",         "inline": True},
+        {"name": "Session",          "value_template": "{session_status}",   "inline": False},
+        {"name": "Fin prévue à",     "value_template": "{ends_at}",           "inline": True},
+        {"name": "Participants A",   "value_template": "{count_A}",          "inline": True},
+        {"name": "Participants B",   "value_template": "{count_B}",          "inline": True},
     ]
 }
 
 # ─── STATS ────────────────────────────────────────────────────────────────────
 STATS = {
-    "title": MsgColors.AQUA.value and "📊 Stats Pomodoro",
+    "title": "📊 Stats Pomodoro",
     "color": MsgColors.AQUA.value,
     "fields": [
-        {"name": "Utilisateurs uniques",      "value_template": "{unique_users}",        "inline": False},
-        {"name": "Temps total (min)",         "value_template": "{total_minutes}",       "inline": False},
-        {"name": "Moyenne/utilisateur (min)", "value_template": "{average_minutes}",     "inline": False},
+        {"name": "Utilisateurs uniques",         "value_template": "{unique_users}",        "inline": False},
+        {"name": "Temps total (min)",            "value_template": "{total_minutes}",       "inline": False},
+        {"name": "Moyenne/utilisateur (min)",    "value_template": "{average_minutes:.1f}", "inline": False},
+        {"name": "Temps total A (min)",          "value_template": "{total_A}",             "inline": False},
+        {"name": "Temps total B (min)",          "value_template": "{total_B}",             "inline": False},
     ]
 }
 
@@ -114,16 +132,28 @@ LEADERBOARD = {
     "title": "🏆 Leaderboard Pomodoro",
     "color": MsgColors.PURPLE.value,
     "entry_template": {
-        "name_template":  "#{rank} {username}",
+        "name_template": "#{rank} {username}",
         "value_template": "{minutes} min"
     }
 }
 
 # ─── ADMIN ─────────────────────────────────────────────────────────────────────
-SET_CHANNEL = {"description_template": "Canal défini sur {channel_mention}.", "color": MsgColors.AQUA.value}
-SET_ROLE_A  = {"description_template": "Rôle A défini sur {role_mention}.",      "color": MsgColors.AQUA.value}
-SET_ROLE_B  = {"description_template": "Rôle B défini sur {role_mention}.",      "color": MsgColors.AQUA.value}
-CLEAR_STATS = {"description_template": "Statistiques réinitialisées.",          "color": MsgColors.YELLOW.value}
+SET_CHANNEL = {
+    "description_template": "Canal défini sur {channel_mention}.",
+    "color": MsgColors.AQUA.value
+}
+SET_ROLE_A = {
+    "description_template": "Rôle A défini sur {role_mention}.",
+    "color": MsgColors.AQUA.value
+}
+SET_ROLE_B = {
+    "description_template": "Rôle B défini sur {role_mention}.",
+    "color": MsgColors.AQUA.value
+}
+CLEAR_STATS = {
+    "description_template": "Statistiques réinitialisées.",
+    "color": MsgColors.YELLOW.value
+}
 
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
 LOOP = {
