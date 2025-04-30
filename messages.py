@@ -1,3 +1,5 @@
+# messages.py
+
 from enum import Enum
 
 class MsgColors(Enum):
@@ -17,9 +19,9 @@ HELP = {
                 "`joinA`       – rejoindre A (50-10)\n"
                 "`joinB`       – rejoindre B (25-5)\n"
                 "`leave`       – quitter\n"
-                "`time`        – temps restant\n"
+                "`time`        – temps restant des deux modes\n"
                 "`status`      – état du bot\n"
-                "`stats`       – vos stats\n"
+                "`stats`       – vos stats détaillées\n"
                 "`leaderboard` – top 5"
             ),
             "inline": False
@@ -93,8 +95,7 @@ LEAVE = {
 
 # ─── TEMPS RESTANT ────────────────────────────────────────────────────────────
 TIME_LEFT = {
-    "title_template": "⏱️ Session {phase}",
-    "description_template": "La {next_phase} commence dans **{minutes}** min et **{seconds}** sec.",
+    "title": "⏱️ Temps restant",
     "color": MsgColors.AQUA.value
 }
 
@@ -103,9 +104,12 @@ STATUS = {
     "title": "🔍 État du bot",
     "color": MsgColors.PURPLE.value,
     "fields": [
-        {"name": "Latence",          "value_template": "{latency} ms",         "inline": True},
+        {"name": "Latence",          "value_template": "{latency} ms",        "inline": True},
         {"name": "Heure (Lausanne)", "value_template": "{local_time}",       "inline": True},
-        {"name": "Session",          "value_template": "{session_status}", "inline": False}
+        {"name": "Maintenance",      "value_template": "{maintenance}",     "inline": True},
+        {"name": "Participants A",   "value_template": "{count_A}",         "inline": True},
+        {"name": "Participants B",   "value_template": "{count_B}",         "inline": True},
+        {"name": "Session courante", "value_template": "{session_status}",  "inline": False}
     ]
 }
 
@@ -114,9 +118,11 @@ STATS = {
     "title": "📊 Stats Pomodoro",
     "color": MsgColors.AQUA.value,
     "fields": [
-        {"name": "Utilisateurs uniques",         "value_template": "{unique_users}",        "inline": False},
-        {"name": "Temps total (min)",            "value_template": "{total_minutes}",       "inline": False},
-        {"name": "Moyenne/utilisateur (min)",    "value_template": "{average_minutes:.1f}", "inline": False}
+        {"name": "Utilisateurs uniques",      "value_template": "{unique_users}",    "inline": False},
+        {"name": "Temps total (min)",         "value_template": "{total_minutes}",   "inline": False},
+        {"name": "Moyenne/utilisateur (min)", "value_template": "{average_minutes:.1f}","inline": False},
+        {"name": "Temps total A (min)",       "value_template": "{total_A}",         "inline": False},
+        {"name": "Temps total B (min)",       "value_template": "{total_B}",         "inline": False}
     ]
 }
 
