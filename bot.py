@@ -4,6 +4,7 @@ from discord.ext import commands, tasks
 import configparser
 import asyncio
 import logging
+from enum import Enum
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 
@@ -22,19 +23,16 @@ import messages
 config = configparser.ConfigParser()
 config.read('settings.ini')
 
-# Modes Pomodoro
 WORK_TIME_A  = config['CURRENT_SETTINGS'].getint('work_time_A', fallback=50)
 BREAK_TIME_A = config['CURRENT_SETTINGS'].getint('break_time_A', fallback=10)
-POMO_ROLE_A  = config['CURRENT_SETTINGS'].get('pomodoro_role_A', fallback='50-10')
+POMO_ROLE_A  = config['CURRENT_SETTINGS'].get('pomodoro_role_A',   fallback='50-10')
 WORK_TIME_B  = config['CURRENT_SETTINGS'].getint('work_time_B', fallback=25)
 BREAK_TIME_B = config['CURRENT_SETTINGS'].getint('break_time_B', fallback=5)
-POMO_ROLE_B  = config['CURRENT_SETTINGS'].get('pomodoro_role_B', fallback='25-5')
+POMO_ROLE_B  = config['CURRENT_SETTINGS'].get('pomodoro_role_B',   fallback='25-5')
 
 POMODORO_CHANNEL_ID = config['CURRENT_SETTINGS'].getint('channel_id', fallback=None)
-PREFIX              = config['CURRENT_SETTINGS'].get('prefix', '*')
-
-# Point 4 : persistance du mode maintenance
-MAINTENANCE_MODE = config['CURRENT_SETTINGS'].getboolean('maintenance_mode', fallback=False)
+PREFIX = config['CURRENT_SETTINGS'].get('prefix', '*')
+MAINTENANCE_MODE = False
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -98,7 +96,8 @@ async def on_ready():
 
 @bot.event
 async def on_command_error(ctx, error):
-    err_key = (
+    # Choix de la clé selon le type d'erreur
+    key = (
         "command_not_found"
         if isinstance(error, commands.CommandNotFound) else
         "maintenance_active"
@@ -109,11 +108,11 @@ async def on_command_error(ctx, error):
         if isinstance(error, commands.CheckFailure) else
         "unexpected_error"
     )
-    err = messages.ERRORS[err_key]
+    err = messages.ERRORS[key]
     embed = discord.Embed(
-        title=err.get("title", ""),
-        description=err.get("description_template", "").format(prefix=PREFIX, error=str(error)),
-        color=err["color"]
+        title       = err["title"],
+        description = err["description_template"].format(prefix=PREFIX, error=str(error)),
+        color       = err["color"]
     )
     await ctx.send(embed=embed)
 
@@ -195,11 +194,11 @@ async def time_left(ctx):
     rem = max(int((SESSION_END - now).total_seconds()), 0)
     m, s = divmod(rem, 60)
     phase = SESSION_PHASE
-    next_phase = 'pause' if phase == 'work' else 'travail'
+    nxt = 'pause' if phase == 'work' else 'travail'
     tpl = messages.TIME_LEFT
     await ctx.send(embed=discord.Embed(
         title=tpl["title_template"].format(phase=phase),
-        description=tpl["description_template"].format(next_phase=next_phase, minutes=m, seconds=s),
+        description=tpl["description_template"].format(next_phase=nxt, minutes=m, seconds=s),
         color=tpl["color"]
     ))
 
@@ -208,17 +207,17 @@ async def time_left(ctx):
 async def status(ctx):
     latency = round(bot.latency * 1000)
     local = datetime.now(timezone.utc).astimezone(ZoneInfo('Europe/Zurich'))
-    session_status = "aucune session active"
+    sess = "aucune session active"
     if SESSION_ACTIVE and SESSION_END:
         rem = max(int((SESSION_END - datetime.now(timezone.utc)).total_seconds()), 0)
         m, s = divmod(rem, 60)
-        session_status = f"{SESSION_PHASE} dans {m} min {s} sec"
+        sess = f"{SESSION_PHASE} dans {m} min {s} sec"
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
     for f in messages.STATUS["fields"]:
         val = f["value_template"].format(
             latency=latency,
             local_time=local.strftime("%Y-%m-%d %H:%M:%S"),
-            session_status=session_status
+            session_status=sess
         )
         e.add_field(name=f["name"], value=val, inline=f["inline"])
     await ctx.send(embed=e)
@@ -234,11 +233,7 @@ async def stats(ctx):
     avg    = (total / unique) if unique else 0
     e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
     for f in messages.STATS["fields"]:
-        val = f["value_template"].format(
-            unique_users=unique,
-            total_minutes=total,
-            average_minutes=avg
-        )
+        val = f["value_template"].format(unique_users=unique, total_minutes=total, average_minutes=avg)
         e.add_field(name=f["name"], value=val, inline=f["inline"])
     await ctx.send(embed=e)
 
@@ -252,9 +247,11 @@ async def leaderboard(ctx):
     else:
         for i, (uid, mins) in enumerate(top5, 1):
             user = await bot.fetch_user(uid)
-            name = messages.LEADERBOARD["entry_template"]["name_template"].format(rank=i, username=user.name)
-            value = messages.LEADERBOARD["entry_template"]["value_template"].format(minutes=mins)
-            e.add_field(name=name, value=value, inline=False)
+            e.add_field(
+                name=messages.LEADERBOARD["entry_template"]["name_template"].format(rank=i, username=user.name),
+                value=messages.LEADERBOARD["entry_template"]["value_template"].format(minutes=mins),
+                inline=False
+            )
     await ctx.send(embed=e)
 
 # ─── ADMIN ─────────────────────────────────────────────────────────────────────
@@ -263,10 +260,6 @@ async def leaderboard(ctx):
 async def maintenance(ctx):
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = not MAINTENANCE_MODE
-    # Persister l’état
-    config['CURRENT_SETTINGS']['maintenance_mode'] = str(MAINTENANCE_MODE).lower()
-    with open('settings.ini', 'w') as f:
-        config.write(f)
     state = "activée" if MAINTENANCE_MODE else "désactivée"
     tpl = messages.MAINT_TOGGLE
     await ctx.send(embed=discord.Embed(
@@ -281,8 +274,7 @@ async def set_channel(ctx, channel: discord.TextChannel):
     config['CURRENT_SETTINGS']['channel_id'] = str(channel.id)
     with open('settings.ini', 'w') as f:
         config.write(f)
-    global POMODORO_CHANNEL_ID
-    POMODORO_CHANNEL_ID = channel.id
+    global POMODORO_CHANNEL_ID; POMODORO_CHANNEL_ID = channel.id
     tpl = messages.SET_CHANNEL
     await ctx.send(embed=discord.Embed(
         description=tpl["description_template"].format(channel_mention=channel.mention),
@@ -295,8 +287,7 @@ async def set_role_A(ctx, role: discord.Role):
     config['CURRENT_SETTINGS']['pomodoro_role_A'] = role.name
     with open('settings.ini', 'w') as f:
         config.write(f)
-    global POMO_ROLE_A
-    POMO_ROLE_A = role.name
+    global POMO_ROLE_A; POMO_ROLE_A = role.name
     tpl = messages.SET_ROLE_A
     await ctx.send(embed=discord.Embed(
         description=tpl["description_template"].format(role_mention=role.mention),
@@ -309,8 +300,7 @@ async def set_role_B(ctx, role: discord.Role):
     config['CURRENT_SETTINGS']['pomodoro_role_B'] = role.name
     with open('settings.ini', 'w') as f:
         config.write(f)
-    global POMO_ROLE_B
-    POMO_ROLE_B = role.name
+    global POMO_ROLE_B; POMO_ROLE_B = role.name
     tpl = messages.SET_ROLE_B
     await ctx.send(embed=discord.Embed(
         description=tpl["description_template"].format(role_mention=role.mention),
@@ -350,25 +340,17 @@ async def pomodoro_loop():
         if not participants:
             continue
         SESSION_ACTIVE = True
-
-        # début travail
         SESSION_PHASE = 'work'
         SESSION_END = datetime.now(timezone.utc) + timedelta(minutes=work)
         mention = (await ensure_role(channel.guild, role_name)).mention
-        await channel.send(messages.LOOP["start_template"].format(
-            mode=mode, duration=work, role_mention=mention
-        ))
+        await channel.send(messages.LOOP["start_template"].format(mode=mode, duration=work, role_mention=mention))
         await asyncio.sleep(work * 60)
 
-        # début pause
         SESSION_PHASE = 'break'
         SESSION_END = datetime.now(timezone.utc) + timedelta(minutes=pause)
-        await channel.send(messages.LOOP["pause_template"].format(
-            mode=mode, duration=pause, role_mention=mention
-        ))
+        await channel.send(messages.LOOP["pause_template"].format(mode=mode, duration=pause, role_mention=mention))
         await asyncio.sleep(pause * 60)
 
-        # enregistrement
         for uid in list(participants):
             ajouter_temps(uid, channel.guild.id, work)
 
