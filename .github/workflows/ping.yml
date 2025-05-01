@@ -3,7 +3,7 @@ name: Keep Render Service Alive
 on:
   workflow_dispatch:    # bouton “Run workflow”
   schedule:
-    - cron: '*/5 * * * *'   # toutes les 5 minutes UTC
+    - cron: '*/10 * * * *'   # toutes les 5 minutes UTC
 
 jobs:
   ping_render:
