@@ -11,7 +11,7 @@ class MsgColors(Enum):
 # ─── TEXTES SIMPLES ────────────────────────────────────────────────────────────
 TEXT = {
     # Erreurs & aide
-    "command_not_found":  "❓ Commandessss inconnue. Tapez `{prefix}help` pour voir la liste des commandes.",
+    "command_not_found":  "❓ Commande inconnue. Tapez `{prefix}help` pour voir la liste des commandes.",
     "maintenance_active": "⚠️ Le bot est en maintenance.",
     "missing_argument":   "❗ Argument manquant. Vérifiez la syntaxe de la commande.",
     "permission_denied":  "🚫 Permission refusée. Vous n'avez pas les droits requis.",
