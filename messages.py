@@ -16,6 +16,7 @@ TEXT = {
     "missing_argument":   "❗ Argument manquant. Vérifiez la syntaxe de la commande.",
     "permission_denied":  "🚫 Permission refusée. Vous n'avez pas les droits requis.",
     "unexpected_error":   "❌ Erreur inattendue : {error}",
+    "setup_incomplete":   "⚠️ Le bot n'est pas entièrement configuré. Utilisez `status` pour voir ce qui est manquant.",
 
     # Join / Leave
     "join_A":             "✅ {user_mention} a rejoint (mode A – 50-10).",
