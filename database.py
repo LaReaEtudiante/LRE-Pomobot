@@ -10,30 +10,37 @@ DB_STATS = TinyDB('leaderboard.json')
 DB_PART   = TinyDB('participants.json')
 
 
-def ajouter_temps(user_id: int, guild_id: int, minutes: int):
-    """Ajoute du temps de travail pour un utilisateur dans un serveur."""
+def ajouter_temps(user_id: int, guild_id: int, seconds: int):
+    """
+    Ajoute du temps de travail (en secondes) pour un utilisateur dans un serveur.
+    """
     table = DB_STATS.table(str(guild_id))
     rec = table.get(User.user_id == user_id)
     if rec:
-        table.update({'minutes': rec['minutes'] + minutes},
+        table.update({'seconds': rec.get('seconds', 0) + seconds},
                      User.user_id == user_id)
     else:
-        table.insert({'user_id': user_id, 'minutes': minutes})
+        table.insert({'user_id': user_id, 'seconds': seconds})
 
 
 def recuperer_temps(user_id: int, guild_id: int) -> int:
-    """Récupère le temps total (en minutes) d’un utilisateur pour un serveur."""
+    """
+    Récupère le temps total (en secondes) d’un utilisateur pour un serveur.
+    """
     table = DB_STATS.table(str(guild_id))
     rec = table.get(User.user_id == user_id)
-    return rec['minutes'] if rec else 0
+    return rec.get('seconds', 0) if rec else 0
 
 
 def classement_top10(guild_id: int):
-    """Top 10 des utilisateurs par temps cumulé."""
+    """
+    Top 10 des utilisateurs par temps cumulé (en secondes).
+    Retourne une liste de (user_id, secondes).
+    """
     table = DB_STATS.table(str(guild_id))
     users = table.all()
-    users.sort(key=lambda x: x['minutes'], reverse=True)
-    return [(u['user_id'], u['minutes']) for u in users[:10]]
+    users.sort(key=lambda x: x.get('seconds', 0), reverse=True)
+    return [(u['user_id'], u.get('seconds', 0)) for u in users[:10]]
 
 
 # — PARTICIPANTS — #
