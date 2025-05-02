@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import os
 import sys
 import discord
@@ -7,6 +8,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+
 
 from tinydb import TinyDB
 from database import (
@@ -420,4 +422,5 @@ async def pomodoro_loop():
             await bot.get_channel(POMODORO_CHANNEL_ID).send(f"☕ Mode B : pause finale (5 min) {mention}")
 
 if __name__ == '__main__':
+    load_dotenv()
     bot.run(os.getenv('DISCORD_TOKEN'))
