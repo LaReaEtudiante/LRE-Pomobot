@@ -225,11 +225,18 @@ async def status(ctx):
     latency = round(bot.latency * 1000)
     now = datetime.now(timezone.utc)
     local = now.astimezone(ZoneInfo('Europe/Zurich')).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Calcul des phases et temps restants
     phA, rA = get_phase_and_remaining(now, 'A')
     phB, rB = get_phase_and_remaining(now, 'B')
     mA, sA = divmod(rA, 60)
     mB, sB = divmod(rB, 60)
 
+    # Comptes de participants
+    countA = len(PARTICIPANTS_A)
+    countB = len(PARTICIPANTS_B)
+
+    # Vérification configuration
     chan = bot.get_channel(POMODORO_CHANNEL_ID)
     chan_field = f"✅ {chan.mention}" if chan else "❌ non configuré"
     guild = ctx.guild
@@ -239,17 +246,21 @@ async def status(ctx):
     roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
 
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
-    e.add_field(name="Latence",          value=f"{latency} ms",        inline=True)
-    e.add_field(name="Heure (Lausanne)", value=local,                   inline=True)
-    e.add_field(name="Mode A",           value=phA,                      inline=False)
-    e.add_field(name="Restant A",        value=f"{mA} min {sA} s",       inline=True)
-    e.add_field(name="Mode B",           value=phB,                      inline=False)
-    e.add_field(name="Restant B",        value=f"{mB} min {sB} s",       inline=True)
-    e.add_field(name="Canal Pomodoro",   value=chan_field,              inline=False)
-    e.add_field(name="Rôle A",           value=roleA_field,             inline=False)
-    e.add_field(name="Rôle B",           value=roleB_field,             inline=False)
-    e.add_field(name="Participants A",   value=str(len(PARTICIPANTS_A)), inline=True)
-    e.add_field(name="Participants B",   value=str(len(PARTICIPANTS_B)), inline=True)
+    e.add_field(name="Latence",          value=f"{latency} ms",                                             inline=True)
+    e.add_field(name="Heure (Lausanne)", value=local,                                                       inline=True)
+    e.add_field(
+        name="Mode A",
+        value=f"{countA} participants en **{phA}** pour {mA} min {sA} s",
+        inline=False
+    )
+    e.add_field(
+        name="Mode B",
+        value=f"{countB} participants en **{phB}** pour {mB} min {sB} s",
+        inline=False
+    )
+    e.add_field(name="Canal Pomodoro",   value=chan_field,                                                  inline=False)
+    e.add_field(name="Rôle A",           value=roleA_field,                                                 inline=False)
+    e.add_field(name="Rôle B",           value=roleB_field,                                                 inline=False)
     await ctx.send(embed=e)
 
 @bot.command(name='stats', help='Voir vos statistiques')
@@ -324,7 +335,6 @@ async def set_channel(ctx, channel: discord.TextChannel):
 async def set_role_A(ctx, role: discord.Role = None):
     global POMO_ROLE_A
 
-    # 1) Si pas d'argument, chercher un rôle existant nommé POMO_ROLE_A
     if role is None:
         existing = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_A)
         if existing:
@@ -345,8 +355,7 @@ async def set_role_A(ctx, role: discord.Role = None):
                 with open('settings.ini','w') as f: config.write(f)
                 POMO_ROLE_A = existing.name
                 return await ctx.send(f"✅ Rôle A configuré : {existing.mention}")
-            # sinon, continuer vers la création
-        # 2) Proposer de créer le rôle par défaut
+
         await ctx.send(
             f"⚙️ Vous n’avez pas spécifié de rôle A.\n"
             f"Voulez-vous que je crée un rôle `{POMO_ROLE_A}` pour vous ? (oui/non)"
@@ -368,7 +377,6 @@ async def set_role_A(ctx, role: discord.Role = None):
         else:
             return await ctx.send("❌ Aucun rôle configuré. Réexécutez `*set_role_A @VotreRôle`.")
 
-    # 3) Si un rôle a été fourni explicitement
     config['CURRENT_SETTINGS']['pomodoro_role_A'] = role.name
     with open('settings.ini','w') as f:
         config.write(f)
@@ -380,7 +388,6 @@ async def set_role_A(ctx, role: discord.Role = None):
 async def set_role_B(ctx, role: discord.Role = None):
     global POMO_ROLE_B
 
-    # 1) Si pas d'argument, chercher un rôle existant nommé POMO_ROLE_B
     if role is None:
         existing = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_B)
         if existing:
@@ -401,8 +408,7 @@ async def set_role_B(ctx, role: discord.Role = None):
                 with open('settings.ini','w') as f: config.write(f)
                 POMO_ROLE_B = existing.name
                 return await ctx.send(f"✅ Rôle B configuré : {existing.mention}")
-            # sinon, continuer vers la création
-        # 2) Proposer de créer le rôle par défaut
+
         await ctx.send(
             f"⚙️ Vous n’avez pas spécifié de rôle B.\n"
             f"Voulez-vous que je crée un rôle `{POMO_ROLE_B}` pour vous ? (oui/non)"
@@ -424,7 +430,6 @@ async def set_role_B(ctx, role: discord.Role = None):
         else:
             return await ctx.send("❌ Aucun rôle configuré. Réexécutez `*set_role_B @VotreRôle`.")
 
-    # 3) Si un rôle a été fourni explicitement
     config['CURRENT_SETTINGS']['pomodoro_role_B'] = role.name
     with open('settings.ini','w') as f:
         config.write(f)
