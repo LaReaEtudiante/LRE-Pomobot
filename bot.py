@@ -85,13 +85,12 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str, int]:
     """
     m = now.minute
     sec = now.second
-    # Mode A : travail 00→50, pause 50→00
+    # Mode A : travail 00→50, pause 50→60
     if mode == 'A':
         if 0 <= m < 50:
             rem = (50 - m) * 60 - sec
             return 'travail', rem
         else:
-            # pause de 50→60
             rem = (60 - m) * 60 - sec
             return 'pause', rem
     # Mode B : 00→25 travail, 25→30 pause, 30→55 travail, 55→60 pause
@@ -105,10 +104,8 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str, int]:
         if 30 <= m < 55:
             rem = (55 - m) * 60 - sec
             return 'travail', rem
-        # 55 ≤ m < 60
         rem = (60 - m) * 60 - sec
         return 'pause', rem
-    # fallback
     return 'travail', 0
 
 # ─── EVENTS & ERROR HANDLING ───────────────────────────────────────────────────
@@ -116,7 +113,7 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str, int]:
 async def on_ready():
     global MAINTENANCE_MODE
     logger.info(f"{bot.user} connecté.")
-    # Restaurer participants avant redémarrage
+    # Restaurer les participants inscrits avant un redémarrage
     for guild in bot.guilds:
         for uid, mode in get_all_participants(guild.id):
             if mode == 'A':
@@ -151,7 +148,6 @@ async def joinA(ctx):
     add_participant(user.id, ctx.guild.id, 'A')
     role = await ensure_role(ctx.guild, POMO_ROLE_A)
     await user.add_roles(role)
-    # Calcul de la phase courante
     phase, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'A')
     m, s = divmod(rem, 60)
     await ctx.send(
@@ -221,29 +217,28 @@ async def time_left(ctx):
 @bot.command(name='status', help='Afficher latence et état du bot')
 async def status(ctx):
     latency = round(bot.latency * 1000)
-    now_utc = datetime.now(timezone.utc)
-    local = now_utc.astimezone(ZoneInfo('Europe/Zurich'))
-    session_status = "aucune session active"
-    ends_at = "-"
-    if SESSION_ACTIVE and SESSION_END:
-        rem = max(int((SESSION_END - now_utc).total_seconds()), 0)
-        m, s = divmod(rem, 60)
-        session_status = f"{SESSION_PHASE} dans {m} min {s} sec"
-        ends_at = SESSION_END.astimezone(ZoneInfo('Europe/Zurich')).strftime("%H:%M:%S")
+    now = datetime.now(timezone.utc)
+    local = now.astimezone(ZoneInfo('Europe/Zurich')).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Calcul en direct pour A & B
+    phA, remA = get_phase_and_remaining(now, 'A')
+    phB, remB = get_phase_and_remaining(now, 'B')
+    mA, sA = divmod(remA, 60)
+    mB, sB = divmod(remB, 60)
+
     e = discord.Embed(
         title=messages.STATUS["title"],
         color=messages.STATUS["color"]
     )
-    for f in messages.STATUS["fields"]:
-        val = f["value_template"].format(
-            latency=latency,
-            local_time=local.strftime("%Y-%m-%d %H:%M:%S"),
-            session_status=session_status,
-            ends_at=ends_at,
-            count_A=len(PARTICIPANTS_A),
-            count_B=len(PARTICIPANTS_B)
-        )
-        e.add_field(name=f["name"], value=val, inline=f["inline"])
+    e.add_field(name="Latence",          value=f"{latency} ms",   inline=True)
+    e.add_field(name="Heure (Lausanne)", value=local,            inline=True)
+    e.add_field(name="Mode A",           value=f"{phA}",          inline=False)
+    e.add_field(name="Restant A",        value=f"{mA} min {sA} s",inline=True)
+    e.add_field(name="Mode B",           value=f"{phB}",          inline=False)
+    e.add_field(name="Restant B",        value=f"{mB} min {sB} s",inline=True)
+    e.add_field(name="Participants A",   value=str(len(PARTICIPANTS_A)), inline=True)
+    e.add_field(name="Participants B",   value=str(len(PARTICIPANTS_B)), inline=True)
+
     await ctx.send(embed=e)
 
 # ─── STATS & LEADERBOARD ───────────────────────────────────────────────────────
@@ -274,10 +269,7 @@ async def stats(ctx):
 @check_maintenance()
 async def leaderboard(ctx):
     top5 = classement_top10(ctx.guild.id)[:5]
-    e = discord.Embed(
-        title=messages.LEADERBOARD["title"],
-        color=messages.LEADERBOARD["color"]
-    )
+    e = discord.Embed(title=messages.LEADERBOARD["title"], color=messages.LEADERBOARD["color"])
     if not top5:
         e.description = "Aucun utilisateur."
     else:
@@ -354,7 +346,7 @@ async def pomodoro_loop():
     minute = now.minute
     triggered = False
 
-    # Mode A : travail 00→50, pause 50→00
+    # Mode A
     if PARTICIPANTS_A:
         role = await ensure_role(channel.guild, POMO_ROLE_A)
         mention = role.mention
@@ -363,10 +355,9 @@ async def pomodoro_loop():
             SESSION_ACTIVE = True
             SESSION_PHASE = 'work'
             end = now.replace(minute=50, second=0, microsecond=0)
-            if end <= now:
-                end += timedelta(hours=1)
+            if end <= now: end += timedelta(hours=1)
             SESSION_END = end
-            await channel.send(f"🔔 Mode A : début de la période de travail (50 min) {mention}")
+            await channel.send(f"🔔 Mode A : début du travail (50 min) {mention}")
         elif minute == 50:
             triggered = True
             SESSION_PHASE = 'break'
@@ -376,7 +367,7 @@ async def pomodoro_loop():
             for uid in list(PARTICIPANTS_A):
                 ajouter_temps(uid, channel.guild.id, WORK_TIME_A)
 
-    # Mode B : 00→25 travail, 25→30 pause, 30→55 travail, 55→00 pause
+    # Mode B
     if PARTICIPANTS_B:
         role = await ensure_role(channel.guild, POMO_ROLE_B)
         mention = role.mention
@@ -385,8 +376,7 @@ async def pomodoro_loop():
             SESSION_ACTIVE = True
             SESSION_PHASE = 'work'
             end = now.replace(minute=25, second=0, microsecond=0)
-            if end <= now:
-                end += timedelta(hours=1)
+            if end <= now: end += timedelta(hours=1)
             SESSION_END = end
             await channel.send(f"🔔 Mode B : début du travail (25 min) {mention}")
         elif minute == 25:
@@ -400,7 +390,7 @@ async def pomodoro_loop():
             triggered = True
             SESSION_PHASE = 'work'
             SESSION_END = now.replace(minute=55, second=0, microsecond=0)
-            await channel.send(f"🔔 Mode B : deuxième période de travail (25 min) {mention}")
+            await channel.send(f"🔔 Mode B : deuxième travail (25 min) {mention}")
         elif minute == 55:
             triggered = True
             SESSION_PHASE = 'break'
@@ -412,7 +402,6 @@ async def pomodoro_loop():
 
     if not triggered:
         return
-
     if not (PARTICIPANTS_A or PARTICIPANTS_B):
         SESSION_ACTIVE = False
 
