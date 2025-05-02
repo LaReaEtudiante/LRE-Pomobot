@@ -10,21 +10,22 @@ class MsgColors(Enum):
 
 # ─── TEXTES SIMPLES ────────────────────────────────────────────────────────────
 TEXT = {
-    # Erreurs
+    # Erreurs & aide
     "command_not_found":  "❓ Commande inconnue. Tapez `{prefix}help` pour voir la liste des commandes.",
     "maintenance_active": "⚠️ Le bot est en maintenance.",
     "missing_argument":   "❗ Argument manquant. Vérifiez la syntaxe de la commande.",
     "permission_denied":  "🚫 Permission refusée. Vous n'avez pas les droits requis.",
     "unexpected_error":   "❌ Erreur inattendue : {error}",
 
-    # Join/leave
-    "already_joined":     "⚠️ Vous êtes déjà inscrit.",
-    "not_registered":     "⚠️ Vous n'étiez pas inscrit.",
+    # Join / Leave
     "join_A":             "✅ {user_mention} a rejoint (mode A – 50-10).",
     "join_B":             "✅ {user_mention} a rejoint (mode B – 25-5).",
     "leave":              "👋 {user_mention} a quitté. +{minutes} min ajoutées.",
 
-    # Maintenance & config
+    # Commande *time
+    "time_left":          "⌛ Phase suivante : {next_phase} – reste {minutes} min {seconds} s",
+
+    # Admin / config
     "maintenance_toggle": "🔧 Mode maintenance {state}.",
     "set_channel":        "🔄 Canal défini sur {channel_mention}.",
     "set_role_A":         "🔄 Rôle A défini sur {role_mention}.",
@@ -69,12 +70,12 @@ STATUS = {
     "title": "🔍 État du bot",
     "color": MsgColors.PURPLE.value,
     "fields": [
-        {"name": "Latence",          "value_template": "{latency} ms",      "inline": True},
-        {"name": "Heure (Lausanne)", "value_template": "{local_time}",    "inline": True},
-        {"name": "Mode A",           "value_template": "{mode_A}",        "inline": False},
-        {"name": "Restant A",        "value_template": "{remaining_A}",   "inline": True},
-        {"name": "Mode B",           "value_template": "{mode_B}",        "inline": False},
-        {"name": "Restant B",        "value_template": "{remaining_B}",   "inline": True},
+        {"name": "Latence",         "value_template": "{latency} ms",        "inline": True},
+        {"name": "Heure (Lausanne)","value_template": "{local_time}",       "inline": True},
+        {"name": "Session",         "value_template": "{session_status}",  "inline": False},
+        {"name": "Fin prévue",      "value_template": "{ends_at}",         "inline": True},
+        {"name": "Participants A",  "value_template": "{count_A}",         "inline": True},
+        {"name": "Participants B",  "value_template": "{count_B}",         "inline": True},
     ]
 }
 
@@ -83,9 +84,11 @@ STATS = {
     "title": "📊 Stats Pomodoro",
     "color": MsgColors.AQUA.value,
     "fields": [
-        {"name": "Utilisateurs uniques",      "value_template": "{unique_users}",      "inline": False},
-        {"name": "Temps total (min)",         "value_template": "{total_minutes}",     "inline": False},
-        {"name": "Moyenne/utilisateur (min)", "value_template": "{average_minutes:.1f}","inline": False}
+        {"name": "Utilisateurs uniques",      "value_template": "{unique_users}",       "inline": False},
+        {"name": "Temps total (min)",         "value_template": "{total_minutes}",      "inline": False},
+        {"name": "Moyenne/utilisateur (min)", "value_template": "{average_minutes:.1f}", "inline": False},
+        {"name": "Temps total A (min)",       "value_template": "{total_A}",            "inline": False},
+        {"name": "Temps total B (min)",       "value_template": "{total_B}",            "inline": False},
     ]
 }
 
