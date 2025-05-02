@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands, tasks
 import configparser
 import logging
+import asyncio
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -98,10 +99,7 @@ def check_channel():
 async def ensure_role(guild: discord.Guild, name: str) -> discord.Role:
     role = discord.utils.get(guild.roles, name=name)
     if role is None:
-        role = await guild.create_role(
-            name=name,
-            colour=discord.Colour(0x206694)
-        )
+        role = await guild.create_role(name=name, colour=discord.Colour(0x206694))
         logger.info(f"Rôle '{name}' créé avec couleur #206694 dans '{guild.name}'")
     return role
 
@@ -164,10 +162,7 @@ async def joinA(ctx):
     await user.add_roles(await ensure_role(ctx.guild, POMO_ROLE_A))
     ph, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'A')
     m, s = divmod(rem, 60)
-    await ctx.send(
-        f"✅ {user.mention} a rejoint (mode A).\n"
-        f"Actuellement en **{ph}**, reste {m} min {s} s"
-    )
+    await ctx.send(f"✅ {user.mention} a rejoint (mode A).\nActuellement en **{ph}**, reste {m} min {s} s")
 
 @bot.command(name='joinB', help='Rejoindre méthode B (25-5)')
 @check_maintenance()
@@ -182,10 +177,7 @@ async def joinB(ctx):
     await user.add_roles(await ensure_role(ctx.guild, POMO_ROLE_B))
     ph, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'B')
     m, s = divmod(rem, 60)
-    await ctx.send(
-        f"✅ {user.mention} a rejoint (mode B).\n"
-        f"Actuellement en **{ph}**, reste {m} min {s} s"
-    )
+    await ctx.send(f"✅ {user.mention} a rejoint (mode B).\nActuellement en **{ph}**, reste {m} min {s} s")
 
 @bot.command(name='leave', help='Quitter la session Pomodoro')
 @check_maintenance()
@@ -246,14 +238,14 @@ async def status(ctx):
 
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
     e.add_field(name="Latence",          value=f"{latency} ms",        inline=True)
-    e.add_field(name="Heure (Lausanne)", value=local,                  inline=True)
-    e.add_field(name="Mode A",           value=phA,                     inline=False)
-    e.add_field(name="Restant A",        value=f"{mA} min {sA} s",      inline=True)
-    e.add_field(name="Mode B",           value=phB,                     inline=False)
-    e.add_field(name="Restant B",        value=f"{mB} min {sB} s",      inline=True)
-    e.add_field(name="Canal Pomodoro",   value=chan_field,             inline=False)
-    e.add_field(name="Rôle A",           value=roleA_field,            inline=False)
-    e.add_field(name="Rôle B",           value=roleB_field,            inline=False)
+    e.add_field(name="Heure (Lausanne)", value=local,                   inline=True)
+    e.add_field(name="Mode A",           value=phA,                      inline=False)
+    e.add_field(name="Restant A",        value=f"{mA} min {sA} s",       inline=True)
+    e.add_field(name="Mode B",           value=phB,                      inline=False)
+    e.add_field(name="Restant B",        value=f"{mB} min {sB} s",       inline=True)
+    e.add_field(name="Canal Pomodoro",   value=chan_field,              inline=False)
+    e.add_field(name="Rôle A",           value=roleA_field,             inline=False)
+    e.add_field(name="Rôle B",           value=roleB_field,             inline=False)
     e.add_field(name="Participants A",   value=str(len(PARTICIPANTS_A)), inline=True)
     e.add_field(name="Participants B",   value=str(len(PARTICIPANTS_B)), inline=True)
     await ctx.send(embed=e)
@@ -327,9 +319,28 @@ async def set_channel(ctx, channel: discord.TextChannel):
 
 @bot.command(name='set_role_A', help='Définir rôle A (admin)')
 @is_admin()
-async def set_role_A(ctx, role: discord.Role):
+async def set_role_A(ctx, role: discord.Role = None):
+    if role is None:
+        await ctx.send(
+            "⚙️ Vous n’avez pas spécifié de rôle A.\n"
+            f"Voulez-vous que je crée un rôle `{POMO_ROLE_A}` pour vous ? (oui/non)"
+        )
+        try:
+            msg = await bot.wait_for('message', check=lambda m: m.author==ctx.author and m.channel==ctx.channel, timeout=60)
+        except asyncio.TimeoutError:
+            return await ctx.send("⏱️ Délai écoulé, réessayez la commande.")
+        if msg.content.lower() in ('oui','o','yes','y'):
+            new_role = await ensure_role(ctx.guild, POMO_ROLE_A)
+            config['CURRENT_SETTINGS']['pomodoro_role_A'] = new_role.name
+            with open('settings.ini','w') as f: config.write(f)
+            global POMO_ROLE_A
+            POMO_ROLE_A = new_role.name
+            return await ctx.send(f"✅ Rôle A créé et configuré : {new_role.mention}")
+        else:
+            return await ctx.send("❌ Aucun rôle créé. Merci de ré-exécuter `*set_role_A @VotreRôle`.")
+    # si role fourni
     config['CURRENT_SETTINGS']['pomodoro_role_A'] = role.name
-    with open('settings.ini', 'w') as f:
+    with open('settings.ini','w') as f:
         config.write(f)
     global POMO_ROLE_A
     POMO_ROLE_A = role.name
@@ -337,9 +348,28 @@ async def set_role_A(ctx, role: discord.Role):
 
 @bot.command(name='set_role_B', help='Définir rôle B (admin)')
 @is_admin()
-async def set_role_B(ctx, role: discord.Role):
+async def set_role_B(ctx, role: discord.Role = None):
+    if role is None:
+        await ctx.send(
+            "⚙️ Vous n’avez pas spécifié de rôle B.\n"
+            f"Voulez-vous que je crée un rôle `{POMO_ROLE_B}` pour vous ? (oui/non)"
+        )
+        try:
+            msg = await bot.wait_for('message', check=lambda m: m.author==ctx.author and m.channel==ctx.channel, timeout=60)
+        except asyncio.TimeoutError:
+            return await ctx.send("⏱️ Délai écoulé, réessayez la commande.")
+        if msg.content.lower() in ('oui','o','yes','y'):
+            new_role = await ensure_role(ctx.guild, POMO_ROLE_B)
+            config['CURRENT_SETTINGS']['pomodoro_role_B'] = new_role.name
+            with open('settings.ini','w') as f: config.write(f)
+            global POMO_ROLE_B
+            POMO_ROLE_B = new_role.name
+            return await ctx.send(f"✅ Rôle B créé et configuré : {new_role.mention}")
+        else:
+            return await ctx.send("❌ Aucun rôle créé. Merci de ré-exécuter `*set_role_B @VotreRôle`.")
+    # si role fourni
     config['CURRENT_SETTINGS']['pomodoro_role_B'] = role.name
-    with open('settings.ini', 'w') as f:
+    with open('settings.ini','w') as f:
         config.write(f)
     global POMO_ROLE_B
     POMO_ROLE_B = role.name
