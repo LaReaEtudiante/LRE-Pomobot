@@ -1,6 +1,6 @@
 # LRE-Pomobot
 
-**Version** : V4.0.0
+**Version** : V4.0.3
 
 Pomobot est un bot Discord pour gérer des sessions Pomodoro en deux modes, calées sur l’heure :
 
