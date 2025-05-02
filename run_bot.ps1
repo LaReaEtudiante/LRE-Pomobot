@@ -1,6 +1,6 @@
 # run_bot.ps1
 param(
-    [string]$RepoPath = "C:\Users\marcn\Desktop\LRE-Pomobot-main\LRE-Pomobot-main"
+    [string]$RepoPath = "C:\Users\marcn\Desktop\LRE-Pomobot-main"
 )
 $ErrorActionPreference = 'Stop'
 $activate = Join-Path $RepoPath 'venv\Scripts\Activate.ps1'
