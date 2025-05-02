@@ -16,7 +16,6 @@ from database import (
     remove_participant,
     get_all_participants
 )
-from keep_alive import keep_alive
 import messages
 
 # ─── CONFIG & GLOBALS ─────────────────────────────────────────────────────────
@@ -421,5 +420,4 @@ async def pomodoro_loop():
             await bot.get_channel(POMODORO_CHANNEL_ID).send(f"☕ Mode B : pause finale (5 min) {mention}")
 
 if __name__ == '__main__':
-    keep_alive()
     bot.run(os.getenv('DISCORD_TOKEN'))
