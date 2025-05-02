@@ -88,7 +88,6 @@ def check_setup():
 
 def check_channel():
     async def predicate(ctx):
-        # Admins et status/help peuvent parler partout
         if ctx.author.guild_permissions.administrator or ctx.command.name in ('status', 'help'):
             return True
         if ctx.channel.id == POMODORO_CHANNEL_ID:
@@ -324,29 +323,52 @@ async def set_channel(ctx, channel: discord.TextChannel):
 @is_admin()
 async def set_role_A(ctx, role: discord.Role = None):
     global POMO_ROLE_A
+
+    # 1) Si pas d'argument, chercher un rôle existant nommé POMO_ROLE_A
     if role is None:
+        existing = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_A)
+        if existing:
+            await ctx.send(
+                f"🎛️ J'ai trouvé un rôle existant {existing.mention} "
+                f"correspondant à `{POMO_ROLE_A}`. Voulez-vous l'utiliser ? (oui/non)"
+            )
+            try:
+                reply = await bot.wait_for(
+                    'message',
+                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
+                    timeout=60
+                )
+            except asyncio.TimeoutError:
+                return await ctx.send("⏱️ Délai écoulé. Réessayez `*set_role_A @VotreRôle`.")
+            if reply.content.lower() in ('oui','o','yes','y'):
+                config['CURRENT_SETTINGS']['pomodoro_role_A'] = existing.name
+                with open('settings.ini','w') as f: config.write(f)
+                POMO_ROLE_A = existing.name
+                return await ctx.send(f"✅ Rôle A configuré : {existing.mention}")
+            # sinon, continuer vers la création
+        # 2) Proposer de créer le rôle par défaut
         await ctx.send(
-            "⚙️ Vous n’avez pas spécifié de rôle A.\n"
+            f"⚙️ Vous n’avez pas spécifié de rôle A.\n"
             f"Voulez-vous que je crée un rôle `{POMO_ROLE_A}` pour vous ? (oui/non)"
         )
         try:
-            msg = await bot.wait_for(
+            reply2 = await bot.wait_for(
                 'message',
                 check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
                 timeout=60
             )
         except asyncio.TimeoutError:
-            return await ctx.send("⏱️ Délai écoulé, réessayez la commande `*set_role_A @Rôle`.")
-        if msg.content.lower() in ('oui','o','yes','y'):
+            return await ctx.send("⏱️ Délai écoulé. Réessayez `*set_role_A @VotreRôle`.")
+        if reply2.content.lower() in ('oui','o','yes','y'):
             new_role = await ensure_role(ctx.guild, POMO_ROLE_A)
             config['CURRENT_SETTINGS']['pomodoro_role_A'] = new_role.name
-            with open('settings.ini','w') as f:
-                config.write(f)
+            with open('settings.ini','w') as f: config.write(f)
             POMO_ROLE_A = new_role.name
             return await ctx.send(f"✅ Rôle A créé et configuré : {new_role.mention}")
         else:
-            return await ctx.send("❌ Aucun rôle créé. Réexécutez `*set_role_A @VotreRôle`.")
-    # si role fourni
+            return await ctx.send("❌ Aucun rôle configuré. Réexécutez `*set_role_A @VotreRôle`.")
+
+    # 3) Si un rôle a été fourni explicitement
     config['CURRENT_SETTINGS']['pomodoro_role_A'] = role.name
     with open('settings.ini','w') as f:
         config.write(f)
@@ -357,29 +379,52 @@ async def set_role_A(ctx, role: discord.Role = None):
 @is_admin()
 async def set_role_B(ctx, role: discord.Role = None):
     global POMO_ROLE_B
+
+    # 1) Si pas d'argument, chercher un rôle existant nommé POMO_ROLE_B
     if role is None:
+        existing = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_B)
+        if existing:
+            await ctx.send(
+                f"🎛️ J'ai trouvé un rôle existant {existing.mention} "
+                f"correspondant à `{POMO_ROLE_B}`. Voulez-vous l'utiliser ? (oui/non)"
+            )
+            try:
+                reply = await bot.wait_for(
+                    'message',
+                    check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
+                    timeout=60
+                )
+            except asyncio.TimeoutError:
+                return await ctx.send("⏱️ Délai écoulé. Réessayez `*set_role_B @VotreRôle`.")
+            if reply.content.lower() in ('oui','o','yes','y'):
+                config['CURRENT_SETTINGS']['pomodoro_role_B'] = existing.name
+                with open('settings.ini','w') as f: config.write(f)
+                POMO_ROLE_B = existing.name
+                return await ctx.send(f"✅ Rôle B configuré : {existing.mention}")
+            # sinon, continuer vers la création
+        # 2) Proposer de créer le rôle par défaut
         await ctx.send(
-            "⚙️ Vous n’avez pas spécifié de rôle B.\n"
+            f"⚙️ Vous n’avez pas spécifié de rôle B.\n"
             f"Voulez-vous que je crée un rôle `{POMO_ROLE_B}` pour vous ? (oui/non)"
         )
         try:
-            msg = await bot.wait_for(
+            reply2 = await bot.wait_for(
                 'message',
                 check=lambda m: m.author == ctx.author and m.channel == ctx.channel,
                 timeout=60
             )
         except asyncio.TimeoutError:
-            return await ctx.send("⏱️ Délai écoulé, réessayez la commande `*set_role_B @Rôle`.")
-        if msg.content.lower() in ('oui','o','yes','y'):
+            return await ctx.send("⏱️ Délai écoulé. Réessayez `*set_role_B @VotreRôle`.")
+        if reply2.content.lower() in ('oui','o','yes','y'):
             new_role = await ensure_role(ctx.guild, POMO_ROLE_B)
             config['CURRENT_SETTINGS']['pomodoro_role_B'] = new_role.name
-            with open('settings.ini','w') as f:
-                config.write(f)
+            with open('settings.ini','w') as f: config.write(f)
             POMO_ROLE_B = new_role.name
             return await ctx.send(f"✅ Rôle B créé et configuré : {new_role.mention}")
         else:
-            return await ctx.send("❌ Aucun rôle créé. Réexécutez `*set_role_B @VotreRôle`.")
-    # si role fourni
+            return await ctx.send("❌ Aucun rôle configuré. Réexécutez `*set_role_B @VotreRôle`.")
+
+    # 3) Si un rôle a été fourni explicitement
     config['CURRENT_SETTINGS']['pomodoro_role_B'] = role.name
     with open('settings.ini','w') as f:
         config.write(f)
