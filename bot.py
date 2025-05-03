@@ -217,14 +217,14 @@ async def me(ctx):
     user = ctx.author
     guild_id = ctx.guild.id
 
-    # Session en cours
-    part = await remove_participant(user.id, guild_id)
-    # but remove_participant deletes; instead fetch raw
-    dbp = aiosqlite.connect(DB_PATH)
-    async with dbp as db:
-        async with db.execute("SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?",
-                              (guild_id, user.id)) as cursor:
-            rec = await cursor.fetchone()
+    # 1) Lire la session en cours (sans la supprimer)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?",
+            (guild_id, user.id)
+        )
+        rec = await cur.fetchone()
+
     if rec:
         join_ts, mode = rec
         elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
@@ -233,23 +233,38 @@ async def me(ctx):
     else:
         status = "Pas en session actuellement"
 
-    # Stats cumulées
-    stats = await get_all_stats(guild_id)
-    total_s = sum(s for uid, s in stats if uid==user.id)
-    total_A = sum(s for uid, s in stats if uid==user.id and s and True)  # refine if mode stored
-    total_B = total_s - total_A
-    sessions = len([1 for uid,s in stats if uid==user.id])  # need real session count in DB
-    avg = total_s / sessions if sessions else 0
+    # 2) Récupérer tous les champs de stats pour cet utilisateur
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT total_seconds, work_seconds_A, break_seconds_A, work_seconds_B, break_seconds_B, session_count "
+            "FROM stats WHERE guild_id=? AND user_id=?",
+            (guild_id, user.id)
+        )
+        row = await cur.fetchone()
 
-    embed = discord.Embed(title=f"📋 Stats de {user.name}", color=messages.MsgColors.AQUA.value)
-    embed.add_field(name="Session en cours", value=status, inline=False)
-    embed.add_field(name="Temps total", value=f"{total_s//60} min {total_s%60} s", inline=False)
-    embed.add_field(name="Sessions effectuées", value=str(sessions), inline=True)
-    embed.add_field(name="Moyenne/session", value=f"{avg//60:.0f} min {(avg%60):.0f} s", inline=True)
+    if row:
+        total_s, wA, bA, wB, bB, scount = row
+    else:
+        total_s = wA = bA = wB = bB = scount = 0
+
+    # 3) Construction de l'embed
+    embed = discord.Embed(
+        title=f"📋 Stats de {user.name}",
+        color=messages.MsgColors.AQUA.value
+    )
+    embed.add_field(name="Session en cours",     value=status,                    inline=False)
+    embed.add_field(name="Temps total",          value=f"{total_s//60} min {total_s%60} s", inline=False)
+    embed.add_field(name="Mode A travail / pause", value=f"{wA//60} min / {bA//60} min", inline=True)
+    embed.add_field(name="Mode B travail / pause", value=f"{wB//60} min / {bB//60} min", inline=True)
+    embed.add_field(name="Nombre de sessions",   value=str(scount),               inline=True)
+    avg = (total_s / scount) if scount else 0
+    embed.add_field(name="Moyenne/session",      value=f"{int(avg)//60} min {int(avg)%60} s", inline=True)
+
     await ctx.send(embed=embed)
 
 @bot.command(name='status', help='Afficher état global du bot')
 async def status(ctx):
+    # Latence et heure locale
     latency = round(bot.latency * 1000)
     now_utc = datetime.now(timezone.utc)
     try:
@@ -258,23 +273,26 @@ async def status(ctx):
         local = now_utc.astimezone()
     local_str = local.strftime("%Y-%m-%d %H:%M:%S")
 
+    # Phases et temps restants
     phA, rA = get_phase_and_remaining(now_utc, 'A')
     phB, rB = get_phase_and_remaining(now_utc, 'B')
     mA, sA = divmod(rA, 60)
     mB, sB = divmod(rB, 60)
 
+    # Comptage participants
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
 
+    # Configuration canal & rôles
     chan = bot.get_channel(POMODORO_CHANNEL_ID)
-    chan_field = f"✅ {chan.mention}" if chan else "❌ non configuré"
-    guild = ctx.guild
-    roleA = discord.utils.get(guild.roles, name=POMO_ROLE_A)
-    roleB = discord.utils.get(guild.roles, name=POMO_ROLE_B)
+    chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
+    guild       = ctx.guild
+    roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
+    roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
     roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
     roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
 
-    # SHA
+    # --- Récupérer le SHA Git court ---
     proc = await asyncio.create_subprocess_shell(
         "git rev-parse --short HEAD",
         stdout=asyncio.subprocess.PIPE,
@@ -283,24 +301,26 @@ async def status(ctx):
     out, _ = await proc.communicate()
     sha = out.decode().strip() if out else "unknown"
 
-    embed = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
-    embed.add_field(name="Latence",          value=f"{latency} ms",                     inline=True)
-    embed.add_field(name="Heure (Lausanne)", value=local_str,                          inline=True)
-    embed.add_field(
-        name="Mode A",
-        value=f"{countA} participants en **{phA}** pour {mA} min {sA} s",
-        inline=False
-    )
-    embed.add_field(
-        name="Mode B",
-        value=f"{countB} participants en **{phB}** pour {mB} min {sB} s",
-        inline=False
-    )
-    embed.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
-    embed.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
-    embed.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
-    embed.add_field(name="Version (SHA)",    value=sha,                                inline=True)
-    await ctx.send(embed=embed)
+    # --- Lire le fichier VERSION ---
+    try:
+        with open("VERSION", encoding="utf-8") as f:
+            file_ver = f.read().strip()
+    except FileNotFoundError:
+        file_ver = "unknown"
+
+    # --- Construction de l'embed ---
+    e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
+    e.add_field(name="Latence",          value=f"{latency} ms",                     inline=True)
+    e.add_field(name="Heure (Lausanne)", value=local_str,                          inline=True)
+    e.add_field(name="Mode A",           value=f"{countA} participants en **{phA}** pour {mA} min {sA} s", inline=False)
+    e.add_field(name="Mode B",           value=f"{countB} participants en **{phB}** pour {mB} min {sB} s", inline=False)
+    e.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
+    e.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
+    e.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
+    e.add_field(name="Version (SHA)",    value=sha,                                inline=True)
+    e.add_field(name="Version (fichier)",value=file_ver,                           inline=True)
+
+    await ctx.send(embed=e)
 
 @bot.command(name='stats', help='Afficher stats du serveur')
 @check_maintenance()
@@ -308,9 +328,10 @@ async def status(ctx):
 @check_channel()
 async def stats(ctx):
     data = await get_all_stats(ctx.guild.id)
-    unique = len({uid for uid,_ in data})
-    total_s = sum(sec for _,sec in data)
-    avg = (total_s / unique) if unique else 0
+    unique = len(data)
+    # total_seconds est en position 2
+    total_s = sum(row[2] for row in data)
+    avg = (total_s/unique) if unique else 0
 
     embed = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
     for f in messages.STATS["fields"]:
