@@ -41,7 +41,12 @@ MAINTENANCE_MODE    = False
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix=PREFIX, help_command=None, intents=intents)
+bot = commands.Bot(
+    command_prefix=PREFIX,
+    help_command=None,
+    intents=intents,
+    case_insensitive=True
+)
 
 # ─── LOGGING ───────────────────────────────────────────────────────────────────
 logger = logging.getLogger('pomodoro_bot')
