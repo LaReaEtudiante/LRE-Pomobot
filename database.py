@@ -43,51 +43,56 @@ async def init_db():
                 await db.execute(f"ALTER TABLE stats ADD COLUMN {col} {definition}")
         await db.commit()
 
-async def ajouter_temps(user_id: int, guild_id: int, seconds: int, mode: str = None, is_session_end: bool = False):
+async def ajouter_temps(user_id: int, guild_id: int, seconds: int,
+                        mode: str = None, is_session_end: bool = False):
     async with aiosqlite.connect(DB_PATH) as db:
-        # S'assurer que la ligne existe
-        await db.execute(
-            """
-            INSERT INTO stats(guild_id, user_id)
-            VALUES(?, ?)
-            ON CONFLICT(guild_id, user_id) DO NOTHING
-            """, (guild_id, user_id)
-        )
-        # Mise à jour temps total
+        # … création du record si besoin …
+
+        # Mise à jour du total global
         await db.execute(
             """
             UPDATE stats
             SET seconds = seconds + ?,
                 total_seconds = total_seconds + ?
             WHERE guild_id=? AND user_id=?
-            """, (seconds, seconds, guild_id, user_id)
+            """,
+            (seconds, seconds, guild_id, user_id)
         )
-        # Mise à jour par mode
+
+        # Travail vs pause A/B
         if mode == 'A':
             await db.execute(
-                """
-                UPDATE stats
-                SET work_seconds_A = work_seconds_A + ?
-                WHERE guild_id=? AND user_id=?
-                """, (seconds, guild_id, user_id)
+                "UPDATE stats SET work_seconds_A = work_seconds_A + ? "
+                "WHERE guild_id=? AND user_id=?",
+                (seconds, guild_id, user_id)
+            )
+        elif mode == 'A_break':
+            await db.execute(
+                "UPDATE stats SET break_seconds_A = break_seconds_A + ? "
+                "WHERE guild_id=? AND user_id=?",
+                (seconds, guild_id, user_id)
             )
         elif mode == 'B':
             await db.execute(
-                """
-                UPDATE stats
-                SET work_seconds_B = work_seconds_B + ?
-                WHERE guild_id=? AND user_id=?
-                """, (seconds, guild_id, user_id)
+                "UPDATE stats SET work_seconds_B = work_seconds_B + ? "
+                "WHERE guild_id=? AND user_id=?",
+                (seconds, guild_id, user_id)
             )
-        # Incrémenter le nombre de sessions si fin de session
+        elif mode == 'B_break':
+            await db.execute(
+                "UPDATE stats SET break_seconds_B = break_seconds_B + ? "
+                "WHERE guild_id=? AND user_id=?",
+                (seconds, guild_id, user_id)
+            )
+
+        # Session_count géré ailleurs (leave)
         if is_session_end:
             await db.execute(
-                """
-                UPDATE stats
-                SET session_count = session_count + 1
-                WHERE guild_id=? AND user_id=?
-                """, (guild_id, user_id)
+                "UPDATE stats SET session_count = session_count + 1 "
+                "WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)
             )
+
         await db.commit()
 
 async def recuperer_temps(user_id: int, guild_id: int) -> dict:

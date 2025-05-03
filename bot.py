@@ -494,71 +494,68 @@ async def update(ctx):
     sys.exit(0)
 
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
-# ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
 @tasks.loop(minutes=1)
 async def pomodoro_loop():
-    now = datetime.now(timezone.utc)
+    now    = datetime.now(timezone.utc)
     minute = now.minute
-    chan = bot.get_channel(POMODORO_CHANNEL_ID)
+    chan   = bot.get_channel(POMODORO_CHANNEL_ID)
     if not chan:
         return
 
-    # ── MODE A ──────────────────────────────
+    # ── MODE A ───────────────────────────────
     if PARTICIPANTS_A:
         mention = (await ensure_role(chan.guild, POMO_ROLE_A)).mention
 
-        # Début travail A (XX:00)
         if minute == 0:
-            await chan.send(f"🔔 Mode A : début travail (50 min) {mention}")
+            # fin de la pause A → on enregistre 10 min de pause
+            for uid in PARTICIPANTS_A:
+                await ajouter_temps(uid, chan.guild.id,
+                                    BREAK_TIME_A*60,
+                                    mode='A_break')
+            await chan.send(f"🔔 Mode A : début travail ({WORK_TIME_A} min) {mention}")
 
-        # Fin travail A & début pause (XX:50)
-        elif minute == 50:
-            for uid in list(PARTICIPANTS_A):
-                # on enregistre les 50 minutes de travail et on incrémente le compteur de session
-                await ajouter_temps(
-                    uid,
-                    chan.guild.id,
-                    WORK_TIME_A * 60,
-                    mode='A',
-                    is_session_end=True
-                )
-            await chan.send(f"☕ Mode A : début pause (10 min) {mention}")
+        elif minute == WORK_TIME_A:
+            # fin du travail A → on enregistre 50 min de travail
+            for uid in PARTICIPANTS_A:
+                await ajouter_temps(uid, chan.guild.id,
+                                    WORK_TIME_A*60,
+                                    mode='A',
+                                    is_session_end=True)
+            await chan.send(f"☕ Mode A : début pause ({BREAK_TIME_A} min) {mention}")
 
-    # ── MODE B ──────────────────────────────
+    # ── MODE B ───────────────────────────────
     if PARTICIPANTS_B:
         mention = (await ensure_role(chan.guild, POMO_ROLE_B)).mention
 
-        # Début travail B1 (XX:00)
         if minute == 0:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id,
+                                    BREAK_TIME_B*60,
+                                    mode='B_break')
             await chan.send(f"🔔 Mode B : début travail (25 min) {mention}")
 
-        # Fin travail B1 & début pause1 (XX:25)
-        elif minute == 25:
-            for uid in list(PARTICIPANTS_B):
-                await ajouter_temps(
-                    uid,
-                    chan.guild.id,
-                    WORK_TIME_B * 60,
-                    mode='B',
-                    is_session_end=True
-                )
-            await chan.send(f"☕ Mode B : pause 1 (5 min) {mention}")
+        elif minute == WORK_TIME_B:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id,
+                                    WORK_TIME_B*60,
+                                    mode='B',
+                                    is_session_end=True)
+            await chan.send(f"☕ Mode B : pause 1 ({BREAK_TIME_B} min) {mention}")
 
-        # Début travail B2 (XX:30)
-        elif minute == 30:
+        elif minute == WORK_TIME_B + BREAK_TIME_B:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id,
+                                    BREAK_TIME_B*60,
+                                    mode='B_break')
             await chan.send(f"🔔 Mode B : deuxième travail (25 min) {mention}")
 
-        # Fin travail B2 & début pause finale (XX:55)
-        elif minute == 55:
-            for uid in list(PARTICIPANTS_B):
-                await ajouter_temps(
-                    uid,
-                    chan.guild.id,
-                    WORK_TIME_B * 60,
-                    mode='B',
-                    is_session_end=True
-                )
-            await chan.send(f"☕ Mode B : pause finale (5 min) {mention}")
+        elif minute == 2*WORK_TIME_B + BREAK_TIME_B:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id,
+                                    WORK_TIME_B*60,
+                                    mode='B',
+                                    is_session_end=True)
+            await chan.send(f"☕ Mode B : pause finale ({BREAK_TIME_B} min) {mention}")
 
 # ─── LANCEMENT ────────────────────────────────────────────────────────────────
 if __name__ == '__main__':
