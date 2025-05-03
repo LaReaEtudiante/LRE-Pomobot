@@ -263,7 +263,14 @@ async def status(ctx):
         stderr=asyncio.subprocess.DEVNULL
     )
     out, _ = await proc.communicate()
-    version = out.decode().strip() if out else "unknown"
+    sha = out.decode().strip() if out else "unknown"
+
+    # Lecture du fichier VERSION
+    try:
+        with open("VERSIONS", encoding="utf-8") as f:
+            version = f.read().strip()
+    except FileNotFoundError:
+        file_ver = "unknown"
 
     # Construction de l'embed
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
@@ -282,7 +289,8 @@ async def status(ctx):
     e.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
     e.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
     e.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
-    e.add_field(name="Version (SHA)",    value=version,                            inline=True)
+    e.add_field(name="Version (SHA)",        value=sha,      inline=True)
+    e.add_field(name="Version",    value=file_ver, inline=True)
 
     await ctx.send(embed=e)
 
