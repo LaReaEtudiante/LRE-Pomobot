@@ -160,13 +160,13 @@ async def on_command_error(ctx, error):
 async def joinA(ctx):
     user = ctx.author
     if user.id in PARTICIPANTS_A | PARTICIPANTS_B:
-        return await ctx.send(f"🚫 {user.mention}, déjà inscrit.")
+        return await ctx.send(f"🚫 {user.mention}, vous êtes déjà inscrit.")
     PARTICIPANTS_A.add(user.id)
     await add_participant(user.id, ctx.guild.id, 'A')
     await user.add_roles(await ensure_role(ctx.guild, POMO_ROLE_A))
     ph, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'A')
     m, s = divmod(rem, 60)
-    await ctx.send(f"✅ {user.mention} a rejoint A (mode A) → **{ph}**, reste {m} min {s} s")
+    await ctx.send(f"✅ {user.mention} Vous avez rejoint le mode A (50-10) → **{ph}**, reste {m} min {s} s")
 
 @bot.command(name='joinB', help='Rejoindre B (25-5)')
 @check_maintenance()
@@ -181,7 +181,7 @@ async def joinB(ctx):
     await user.add_roles(await ensure_role(ctx.guild, POMO_ROLE_B))
     ph, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'B')
     m, s = divmod(rem, 60)
-    await ctx.send(f"✅ {user.mention} a rejoint B (mode B) → **{ph}**, reste {m} min {s} s")
+    await ctx.send(f"✅ {user.mention} Vous avez rejoint le mode B (25-5) → **{ph}**, reste {m} min {s} s")
 
 @bot.command(name='leave', help='Quitter la session Pomodoro')
 @check_maintenance()
@@ -228,6 +228,7 @@ async def time_left(ctx):
 # ─── COMMANDE STATUS ───────────────────────────────────────────────────────────
 @bot.command(name='status', help='Afficher état et configuration')
 async def status(ctx):
+    # Latence et heure locale
     latency = round(bot.latency * 1000)
     now_utc = datetime.now(timezone.utc)
     try:
@@ -236,13 +237,17 @@ async def status(ctx):
         local = now_utc.astimezone()
     local_str = local.strftime("%Y-%m-%d %H:%M:%S")
 
+    # Phases et temps restants pour A et B
     phA, rA = get_phase_and_remaining(now_utc, 'A')
     phB, rB = get_phase_and_remaining(now_utc, 'B')
     mA, sA = divmod(rA, 60)
     mB, sB = divmod(rB, 60)
+
+    # Comptage des participants
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
 
+    # Configuration canal & rôles
     chan = bot.get_channel(POMODORO_CHANNEL_ID)
     chan_field = f"✅ {chan.mention}" if chan else "❌ non configuré"
     guild = ctx.guild
@@ -251,6 +256,16 @@ async def status(ctx):
     roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
     roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
 
+    # Récupération du SHA Git court
+    proc = await asyncio.create_subprocess_shell(
+        "git rev-parse --short HEAD",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    out, _ = await proc.communicate()
+    version = out.decode().strip() if out else "unknown"
+
+    # Construction de l'embed
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
     e.add_field(name="Latence",          value=f"{latency} ms",                     inline=True)
     e.add_field(name="Heure (Lausanne)", value=local_str,                          inline=True)
@@ -267,6 +282,8 @@ async def status(ctx):
     e.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
     e.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
     e.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
+    e.add_field(name="Version (SHA)",    value=version,                            inline=True)
+
     await ctx.send(embed=e)
 
 # ─── STATS & LEADERBOARD ───────────────────────────────────────────────────────
