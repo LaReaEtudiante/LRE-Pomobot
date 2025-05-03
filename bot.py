@@ -8,6 +8,7 @@ import logging
 import asyncio
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+import sys
 
 import aiosqlite
 from database import DB_PATH
@@ -411,6 +412,29 @@ async def help_cmd(ctx):
     for f in messages.HELP["fields"]:
         e.add_field(name=f["name"], value=f["value"], inline=f["inline"])
     await ctx.send(embed=e)
+
+@bot.command(name='update', help='Récupérer la dernière version Git et redémarrer')
+@is_admin()
+async def update(ctx):
+    # Vérifier qu'on est dans un dépôt Git
+    if not os.path.isdir('.git'):
+        return await ctx.send("❌ Ce dossier n'est pas un dépôt Git. Clonez le repo pour utiliser `*update`.")
+    await ctx.send("🔄 Pull depuis GitHub…")
+    proc = await asyncio.create_subprocess_shell(
+        "git pull origin main",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    out, err = await proc.communicate()
+    msg = ""
+    if out:
+        msg += f"```prolog\n{out.decode().strip()}\n```"
+    if err:
+        msg += f"```diff\n{err.decode().strip()}\n```"
+    await ctx.send(msg or "✅ À jour, rien à faire.")
+    await ctx.send("⏹️ Redémarrage du bot…")
+    await bot.close()
+    sys.exit(0)
 
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
 @tasks.loop(minutes=1)
