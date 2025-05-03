@@ -333,21 +333,33 @@ async def status(ctx):
 @check_setup()
 @check_channel()
 async def stats(ctx):
-    data = await get_all_stats(ctx.guild.id)
+    guild_id = ctx.guild.id
+    # a) Totaux globaux existants
+    data = await get_all_stats(guild_id)
     unique = len(data)
-    # total_seconds est en position 2
-    total_s = sum(row[2] for row in data)
-    avg = (total_s/unique) if unique else 0
+    total_s = sum(r[2] for r in data)  # total_seconds en col 2
+    avg     = (total_s/unique) if unique else 0
 
-    embed = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
-    for f in messages.STATS["fields"]:
-        val = f["value_template"].format(
-            unique_users=unique,
-            total_minutes=total_s/60,
-            average_minutes=avg/60
-        )
-        embed.add_field(name=f["name"], value=val, inline=f["inline"])
-    await ctx.send(embed=embed)
+    # b) Totaux journaliers (7 derniers jours)
+    daily = await get_daily_totals(guild_id, days=7)
+    # format: "2025-05-03: 120m"    
+    daily_str = "\n".join(f"{d}: {s//60}m" for d,s in daily) or "aucune donnée"
+
+    # c) Sessions par semaine (4 dernières semaines)
+    weekly = await get_weekly_sessions(guild_id, weeks=4)
+    weekly_str = "\n".join(f"{yw}: {cnt}" for yw,cnt in weekly) or "aucune donnée"
+
+    # d) Embed construction
+    e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
+    # champs existants
+    e.add_field(name="Utilisateurs uniques",      value=str(unique),               inline=False)
+    e.add_field(name="Temps total (min)",         value=f"{total_s/60:.1f}",      inline=False)
+    e.add_field(name="Moyenne/utilisateur (min)", value=f"{avg/60:.1f}",          inline=False)
+    # nouvelles métriques
+    e.add_field(name="📅 Totaux 7 derniers jours", value=daily_str,                 inline=False)
+    e.add_field(name="🗓 Sessions / semaine",      value=weekly_str,                inline=False)
+
+    await ctx.send(embed=e)
 
 @bot.command(name='leaderboard', help='Afficher top 5')
 @check_maintenance()
