@@ -21,7 +21,9 @@ from database import (
     classement_top10,
     add_participant,
     remove_participant,
-    get_all_participants
+    get_all_participants,
+    get_daily_totals,
+    get_weekly_sessions,
 )
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -334,29 +336,29 @@ async def status(ctx):
 @check_channel()
 async def stats(ctx):
     guild_id = ctx.guild.id
-    # a) Totaux globaux existants
-    data = await get_all_stats(guild_id)
-    unique = len(data)
-    total_s = sum(r[2] for r in data)  # total_seconds en col 2
+
+    # a) Stats globales existantes
+    data    = await get_all_stats(guild_id)
+    unique  = len(data)
+    total_s = sum(r[2] for r in data)            # total_seconds en position 2
     avg     = (total_s/unique) if unique else 0
 
     # b) Totaux journaliers (7 derniers jours)
     daily = await get_daily_totals(guild_id, days=7)
-    # format: "2025-05-03: 120m"    
-    daily_str = "\n".join(f"{d}: {s//60}m" for d,s in daily) or "aucune donnée"
+    daily_str = "\n".join(f"{day}: {secs//60} m" for day, secs in daily) or "aucune donnée"
 
     # c) Sessions par semaine (4 dernières semaines)
     weekly = await get_weekly_sessions(guild_id, weeks=4)
-    weekly_str = "\n".join(f"{yw}: {cnt}" for yw,cnt in weekly) or "aucune donnée"
+    weekly_str = "\n".join(f"{yw}: {count}" for yw, count in weekly) or "aucune donnée"
 
-    # d) Embed construction
+    # --- Construction de l’embed ---
     e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
-    # champs existants
     e.add_field(name="Utilisateurs uniques",      value=str(unique),               inline=False)
     e.add_field(name="Temps total (min)",         value=f"{total_s/60:.1f}",      inline=False)
     e.add_field(name="Moyenne/utilisateur (min)", value=f"{avg/60:.1f}",          inline=False)
-    # nouvelles métriques
-    e.add_field(name="📅 Totaux 7 derniers jours", value=daily_str,                 inline=False)
+
+    # Nouvelles sections
+    e.add_field(name="📅 Totaux 7 jours",          value=daily_str,                 inline=False)
     e.add_field(name="🗓 Sessions / semaine",      value=weekly_str,                inline=False)
 
     await ctx.send(embed=e)
