@@ -271,6 +271,7 @@ async def status(ctx):
             version = f.read().strip()
     except FileNotFoundError:
         file_ver = "unknown"
+    combined = f"{sha} – {file_ver}"
 
     # Construction de l'embed
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
@@ -289,8 +290,7 @@ async def status(ctx):
     e.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
     e.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
     e.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
-    e.add_field(name="Version (SHA)",        value=sha,      inline=True)
-    e.add_field(name="Version",    value=file_ver, inline=True)
+    e.add_field(name="Version", value=combined, inline=True)
 
     await ctx.send(embed=e)
 
