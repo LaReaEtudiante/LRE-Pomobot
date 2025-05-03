@@ -10,26 +10,24 @@ class MsgColors(Enum):
 
 # ─── TEXTES SIMPLES ────────────────────────────────────────────────────────────
 TEXT = {
-    # Erreurs
     "command_not_found":  "❓ Commande inconnue. Tapez `{prefix}help` pour voir la liste des commandes.",
     "maintenance_active": "⚠️ Le bot est en maintenance.",
     "missing_argument":   "❗ Argument manquant. Vérifiez la syntaxe de la commande.",
     "permission_denied":  "🚫 Permission refusée. Vous n'avez pas les droits requis.",
     "unexpected_error":   "❌ Erreur inattendue : {error}",
 
-    # Join/leave
     "already_joined":     "⚠️ Vous êtes déjà inscrit.",
     "not_registered":     "⚠️ Vous n'étiez pas inscrit.",
     "join_A":             "✅ {user_mention} a rejoint (mode A – 50-10).",
     "join_B":             "✅ {user_mention} a rejoint (mode B – 25-5).",
     "leave":              "👋 {user_mention} a quitté. +{minutes} min ajoutées.",
 
-    # Maintenance & config
     "maintenance_toggle": "🔧 Mode maintenance {state}.",
     "set_channel":        "🔄 Canal défini sur {channel_mention}.",
     "set_role_A":         "🔄 Rôle A défini sur {role_mention}.",
     "set_role_B":         "🔄 Rôle B défini sur {role_mention}.",
-    "clear_stats":        "♻️ Statistiques réinitialisées."
+    "clear_stats":        "♻️ Statistiques réinitialisées.",
+    "setup_incomplete":   "❌ Configuration incomplète. Veuillez lancer `*set_channel`, `*set_role_A` et `*set_role_B`."
 }
 
 # ─── HELP EMBED ───────────────────────────────────────────────────────────────
@@ -42,11 +40,11 @@ HELP = {
             "value": (
                 "`joinA`       – rejoindre le mode A (50-10)\n"
                 "`joinB`       – rejoindre le mode B (25-5)\n"
-                "`leave`       – quitter le mode dans lequel vous êtes\n"
-                "`time`        – temps restant des deux modes\n"
-                "`status`      – état du bot\n"
-                "`stats`       – statistiques du serveur\n"
-                "`leaderboard` – top 5 général"
+                "`leave`       – quitter le mode actuel\n"
+                "`me`          – voir votre état et vos stats personnelles\n"
+                "`status`      – état global du bot\n"
+                "`stats`       – stats serveur\n"
+                "`leaderboard` – top 5 contributeurs"
             ),
             "inline": False
         },
@@ -58,7 +56,7 @@ HELP = {
                 "`set_role_A`  – définir le rôle A\n"
                 "`set_role_B`  – définir le rôle B\n"
                 "`clear_stats` – réinitialiser les stats du serveur\n"
-                "`update`      – mettre à jour le bot et redémarrer"
+                "`update`      – pull GitHub & redémarrer"
             ),
             "inline": False
         }
@@ -70,12 +68,13 @@ STATUS = {
     "title": "🔍 État du bot",
     "color": MsgColors.PURPLE.value,
     "fields": [
-        {"name": "Latence",          "value_template": "{latency} ms",      "inline": True},
+        {"name": "Latence",          "value_template": "{latency} ms",   "inline": True},
         {"name": "Heure (Lausanne)", "value_template": "{local_time}",    "inline": True},
-        {"name": "Mode A",           "value_template": "{mode_A}",        "inline": False},
-        {"name": "Restant A",        "value_template": "{remaining_A}",   "inline": True},
-        {"name": "Mode B",           "value_template": "{mode_B}",        "inline": False},
-        {"name": "Restant B",        "value_template": "{remaining_B}",   "inline": True},
+        {"name": "Mode A",           "value_template": "{mode_A}",       "inline": False},
+        {"name": "Restant A",        "value_template": "{remaining_A}",  "inline": True},
+        {"name": "Mode B",           "value_template": "{mode_B}",       "inline": False},
+        {"name": "Restant B",        "value_template": "{remaining_B}",  "inline": True},
+        {"name": "Version Git",      "value_template": "{version}",      "inline": True},
     ]
 }
 
