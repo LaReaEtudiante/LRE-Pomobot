@@ -1,4 +1,4 @@
-discord.py==2.2.3  # REMPLACE 2.2.3 par la vraie version
-python-dotenv==1.0.0 # REMPLACE 1.0.0 par la vraie version
-Flask==2.3.3 # REMPLACE 2.3.3 par la vraie version
-tinydb==4.8.0 # REMPLACE 4.8.0 par la vraie version
+discord.py==2.2.3
+python-dotenv
+aiosqlite
+tzdata
