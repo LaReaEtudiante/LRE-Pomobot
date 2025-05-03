@@ -237,13 +237,13 @@ async def status(ctx):
         local = now_utc.astimezone()
     local_str = local.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Phases et temps restants pour A et B
+    # Phases et temps restants
     phA, rA = get_phase_and_remaining(now_utc, 'A')
     phB, rB = get_phase_and_remaining(now_utc, 'B')
     mA, sA = divmod(rA, 60)
     mB, sB = divmod(rB, 60)
 
-    # Comptage des participants
+    # Comptage participants
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
 
@@ -256,7 +256,7 @@ async def status(ctx):
     roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
     roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
 
-    # Récupération du SHA Git court
+    # 1) Récupérer le SHA Git court
     proc = await asyncio.create_subprocess_shell(
         "git rev-parse --short HEAD",
         stdout=asyncio.subprocess.PIPE,
@@ -265,12 +265,14 @@ async def status(ctx):
     out, _ = await proc.communicate()
     sha = out.decode().strip() if out else "unknown"
 
-    # Lecture du fichier VERSION
+    # 2) Lire le fichier VERSION (manuel)
     try:
-        with open("VERSIONS", encoding="utf-8") as f:
-            version = f.read().strip()
+        with open("VERSION", encoding="utf-8") as f:
+            file_ver = f.read().strip()
     except FileNotFoundError:
         file_ver = "unknown"
+
+    # Combiner les deux versions dans une même chaîne
     combined = f"{sha} – {file_ver}"
 
     # Construction de l'embed
@@ -290,7 +292,7 @@ async def status(ctx):
     e.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
     e.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
     e.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
-    e.add_field(name="Version", value=combined, inline=True)
+    e.add_field(name="Version",          value=combined,                           inline=True)
 
     await ctx.send(embed=e)
 
