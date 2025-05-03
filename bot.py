@@ -363,23 +363,75 @@ async def stats(ctx):
 
     await ctx.send(embed=e)
 
-@bot.command(name='leaderboard', help='Afficher top 5')
+@bot.command(name='leaderboard', help='Top contributeurs. Usage: *leaderboard [overall|A|B|pause|sessions|avg]')
 @check_maintenance()
 @check_setup()
 @check_channel()
-async def leaderboard(ctx):
-    top5 = await classement_top10(ctx.guild.id)
-    embed = discord.Embed(title=messages.LEADERBOARD["title"], color=messages.LEADERBOARD["color"])
-    if not top5:
-        embed.description = "Aucun utilisateur."
+async def leaderboard(ctx, category: str = "overall"):
+    guild_id = ctx.guild.id
+    title_map = {
+        "overall":  ("🏆 Top Global",          "total_seconds"),
+        "A":        ("🥇 Top Mode A",         "work_seconds_A"),
+        "B":        ("🥈 Top Mode B",         "work_seconds_B"),
+        "pause":    ("☕ Top Pauses",         None),  # sum of both pauses
+        "sessions": ("🔄 Top Sessions",       "session_count"),
+        "avg":      ("📊 Top Moyenne/session","avg")
+    }
+    cat = category.lower()
+    if cat not in title_map:
+        return await ctx.send(f"⚠️ Catégorie invalide. Choisissez parmi {', '.join(title_map)}.")
+
+    title, field = title_map[cat]
+    e = discord.Embed(title=title, color=messages.LEADERBOARD["color"])
+
+    # Récupérer tous les stats
+    rows = await get_all_stats(guild_id)  
+    # rows = [(user_id, seconds, total_seconds, wA, bA, wB, bB, scount), ...]
+
+    # Construire la liste selon la catégorie
+    leaderboard = []
+    for uid, *_rest in rows:
+        # décomposition
+        _, _, total, wA, bA, wB, bB, sc = _rest = _rest
+        if cat == "overall":
+            score = total
+        elif cat == "A":
+            score = wA
+        elif cat == "B":
+            score = wB
+        elif cat == "pause":
+            score = bA + bB
+        elif cat == "sessions":
+            score = sc
+        else:  # avg
+            score = total / sc if sc else 0
+        leaderboard.append((uid, score))
+
+    # Trier et limiter
+    leaderboard.sort(key=lambda x: x[1], reverse=True)
+    top5 = leaderboard[:5]
+
+    if not top5 or all(score == 0 for _, score in top5):
+        e.description = "Aucun contributeur pour cette catégorie."
     else:
-        for i,(uid,secs) in enumerate(top5, start=1):
+        for i, (uid, score) in enumerate(top5, start=1):
             user = await bot.fetch_user(uid)
-            m,s = divmod(secs,60)
-            name = messages.LEADERBOARD["entry_template"]["name_template"].format(rank=i, username=user.name)
-            val  = messages.LEADERBOARD["entry_template"]["value_template"].format(minutes=f"{m}m{s}s")
-            embed.add_field(name=name, value=val, inline=False)
-    await ctx.send(embed=embed)
+            # formater le score selon la catégorie
+            if cat in ("overall","A","B","pause"):
+                # score en minutes (arrondi 1 décimale)
+                val = f"{score/60:.1f} min"
+            elif cat == "sessions":
+                val = f"{score} sessions"
+            else:  # avg
+                minutes = int(score) // 60
+                seconds = int(score) % 60
+                val = f"{minutes} min {seconds} s"
+            name = messages.LEADERBOARD["entry_template"]["name_template"].format(
+                rank=i, username=user.name
+            )
+            e.add_field(name=name, value=val, inline=False)
+
+    await ctx.send(embed=e)
 
 # ─── COMMANDES ADMIN ───────────────────────────────────────────────────────────
 @bot.command(name='help', help='Afficher l’aide')

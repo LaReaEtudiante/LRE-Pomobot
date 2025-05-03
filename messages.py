@@ -44,7 +44,7 @@ HELP = {
                 "`me`          – voir vos stats détaillées\n"
                 "`status`      – voir l’état global du bot\n"
                 "`stats`       – statistiques du serveur\n"
-                "`leaderboard` – top 5 des contributeurs"
+                "`leaderboard [cat]` – top 5 (overall, A, B, pause, sessions, avg)"
             ),
             "inline": False
         },
