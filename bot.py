@@ -363,73 +363,73 @@ async def stats(ctx):
 
     await ctx.send(embed=e)
 
-@bot.command(name='leaderboard', help='Top contributeurs. Usage: *leaderboard [overall|A|B|pause|sessions|avg]')
+@bot.command(
+    name='leaderboard',
+    help='Top contributeurs : *leaderboard [overall|A|B|pause|sessions|avg]'
+)
 @check_maintenance()
 @check_setup()
 @check_channel()
 async def leaderboard(ctx, category: str = "overall"):
     guild_id = ctx.guild.id
-    title_map = {
-        "overall":  ("🏆 Top Global",          "total_seconds"),
-        "A":        ("🥇 Top Mode A",         "work_seconds_A"),
-        "B":        ("🥈 Top Mode B",         "work_seconds_B"),
-        "pause":    ("☕ Top Pauses",         None),  # sum of both pauses
-        "sessions": ("🔄 Top Sessions",       "session_count"),
-        "avg":      ("📊 Top Moyenne/session","avg")
-    }
     cat = category.lower()
+
+    title_map = {
+        "overall":  ("🏆 Top global",           None),
+        "A":        ("🥇 Top Mode A",          "A"),
+        "B":        ("🥈 Top Mode B",          "B"),
+        "pause":    ("☕ Top pauses",          "pause"),
+        "sessions": ("🔄 Top sessions",        "sessions"),
+        "avg":      ("📊 Top moyenne/session","avg")
+    }
+
     if cat not in title_map:
-        return await ctx.send(f"⚠️ Catégorie invalide. Choisissez parmi {', '.join(title_map)}.")
+        noms = ", ".join(title_map.keys())
+        return await ctx.send(f"⚠️ Catégorie invalide : choisissez parmi {noms}.")
 
-    title, field = title_map[cat]
-    e = discord.Embed(title=title, color=messages.LEADERBOARD["color"])
-
-    # Récupérer tous les stats
-    rows = await get_all_stats(guild_id)  
+    title, key = title_map[cat]
+    rows = await get_all_stats(guild_id)
     # rows = [(user_id, seconds, total_seconds, wA, bA, wB, bB, scount), ...]
 
-    # Construire la liste selon la catégorie
-    leaderboard = []
-    for uid, *_rest in rows:
-        # décomposition
-        _, _, total, wA, bA, wB, bB, sc = _rest = _rest
+    # Construire la liste des tuples selon cat
+    entries = []
+    for (uid, _, total, wA, bA, wB, bB, sc) in rows:
         if cat == "overall":
             score = total
+            label = f"{score/60:.1f} min"
         elif cat == "A":
             score = wA
+            label = f"{wA/60:.1f} / {bA/60:.1f} min"
         elif cat == "B":
             score = wB
+            label = f"{wB/60:.1f} / {bB/60:.1f} min"
         elif cat == "pause":
             score = bA + bB
+            label = f"{(bA+bB)/60:.1f} min"
         elif cat == "sessions":
             score = sc
+            label = f"{score} sessions"
         else:  # avg
-            score = total / sc if sc else 0
-        leaderboard.append((uid, score))
+            score = (total / sc) if sc else 0
+            m, s = divmod(int(score), 60)
+            label = f"{m} min {s} s"
+        entries.append((uid, score, label))
 
-    # Trier et limiter
-    leaderboard.sort(key=lambda x: x[1], reverse=True)
-    top5 = leaderboard[:5]
+    # Trier et garder top5
+    entries.sort(key=lambda x: x[1], reverse=True)
+    top5 = entries[:5]
 
-    if not top5 or all(score == 0 for _, score in top5):
+    # Préparer l'embed
+    e = discord.Embed(title=title, color=messages.LEADERBOARD["color"])
+    if not top5 or all(score == 0 for _,score,_ in top5):
         e.description = "Aucun contributeur pour cette catégorie."
     else:
-        for i, (uid, score) in enumerate(top5, start=1):
+        for i, (uid, _, label) in enumerate(top5, start=1):
             user = await bot.fetch_user(uid)
-            # formater le score selon la catégorie
-            if cat in ("overall","A","B","pause"):
-                # score en minutes (arrondi 1 décimale)
-                val = f"{score/60:.1f} min"
-            elif cat == "sessions":
-                val = f"{score} sessions"
-            else:  # avg
-                minutes = int(score) // 60
-                seconds = int(score) % 60
-                val = f"{minutes} min {seconds} s"
             name = messages.LEADERBOARD["entry_template"]["name_template"].format(
                 rank=i, username=user.name
             )
-            e.add_field(name=name, value=val, inline=False)
+            e.add_field(name=name, value=label, inline=False)
 
     await ctx.send(embed=e)
 
