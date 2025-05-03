@@ -43,7 +43,7 @@ HELP = {
             "name": "Étudiant",
             "value": (
                 "`joinA`       – rejoindre A (50-10)\n"
-                "`joinB`       – rejoindre B (25-5)\n"
+                "`joinB`       – rejoindre B! (25-5)\n"
                 "`leave`       – quitter\n"
                 "`time`        – temps restant\n"
                 "`status`      – état du bot\n"
