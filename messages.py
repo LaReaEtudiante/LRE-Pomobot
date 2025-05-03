@@ -38,25 +38,25 @@ HELP = {
         {
             "name": "Étudiant",
             "value": (
-                "`joinA`       – rejoindre le mode A (50-10)\n"
-                "`joinB`       – rejoindre le mode B (25-5)\n"
-                "`leave`       – quitter le mode actuel\n"
-                "`me`          – voir votre état et vos stats personnelles\n"
-                "`status`      – état global du bot\n"
-                "`stats`       – stats serveur\n"
-                "`leaderboard` – top 5 contributeurs"
+                "`joinA`       – rejoindre le mode A (50-min travail / 10-min pause)\n"
+                "`joinB`       – rejoindre le mode B (25-5-25-5)\n"
+                "`leave`       – quitter la session en cours\n"
+                "`me`          – voir vos stats détaillées\n"
+                "`status`      – voir l’état global du bot\n"
+                "`stats`       – statistiques du serveur\n"
+                "`leaderboard` – top 5 des contributeurs"
             ),
             "inline": False
         },
         {
             "name": "Administrateur",
             "value": (
-                "`maintenance` – on/off\n"
-                "`set_channel` – définir le salon du bot\n"
-                "`set_role_A`  – définir le rôle A\n"
-                "`set_role_B`  – définir le rôle B\n"
-                "`clear_stats` – réinitialiser les stats du serveur\n"
-                "`update`      – pull GitHub & redémarrer"
+                "`maintenance` – activer/désactiver maintenance\n"
+                "`set_channel` – définir le salon Pomodoro\n"
+                "`set_role_A`  – définir ou créer le rôle A\n"
+                "`set_role_B`  – définir ou créer le rôle B\n"
+                "`clear_stats` – réinitialiser toutes les stats\n"
+                "`update`      – pull GitHub & redémarrer le bot"
             ),
             "inline": False
         }

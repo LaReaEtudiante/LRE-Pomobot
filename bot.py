@@ -341,6 +341,13 @@ async def leaderboard(ctx):
     await ctx.send(embed=embed)
 
 # ─── COMMANDES ADMIN ───────────────────────────────────────────────────────────
+@bot.command(name='help', help='Afficher l’aide')
+async def help_cmd(ctx):
+    e = discord.Embed(title=messages.HELP["title"], color=messages.HELP["color"])
+    for f in messages.HELP["fields"]:
+        e.add_field(name=f["name"], value=f["value"], inline=f["inline"])
+    await ctx.send(embed=e)
+
 @bot.command(name='maintenance', help='Activer/Désactiver maintenance')
 @is_admin()
 async def maintenance(ctx):
