@@ -74,7 +74,7 @@ async def init_db():
 
 # ─── AJOUT / MISE À JOUR TEMPS ─────────────────────────────────────────────────
 async def ajouter_temps(user_id: int, guild_id: int, seconds: int,
-                        mode: str = None, is_session_end: bool = False):
+                        mode: str = '', is_session_end: bool = False):
     async with aiosqlite.connect(DB_PATH) as db:
         # S'assurer que l’utilisateur existe
         await db.execute("""

@@ -158,7 +158,7 @@ async def pomodoro_loop():
         if minute == 0:
             for uid in PARTICIPANTS_B:
                 await ajouter_temps(uid, chan.guild.id, BREAK_TIME_B*60, mode='B_break')
-            await chan.send(f"🔔 Mode B : début travail (25 min) {mention}")
+            await chan.send(f"🔔 Mode B : début travail ({WORK_TIME_B} min) {mention}")
         elif minute == WORK_TIME_B:
             for uid in PARTICIPANTS_B:
                 await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
@@ -166,7 +166,7 @@ async def pomodoro_loop():
         elif minute == WORK_TIME_B + BREAK_TIME_B:
             for uid in PARTICIPANTS_B:
                 await ajouter_temps(uid, chan.guild.id, BREAK_TIME_B*60, mode='B_break')
-            await chan.send(f"🔔 Mode B : deuxième travail (25 min) {mention}")
+            await chan.send(f"🔔 Mode B : deuxième travail ({WORK_TIME_B} min) {mention}")
         elif minute == 2*WORK_TIME_B + BREAK_TIME_B:
             for uid in PARTICIPANTS_B:
                 await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
