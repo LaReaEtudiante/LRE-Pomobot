@@ -410,17 +410,17 @@ async def leaderboard(ctx):
         ("📊 Top 5 Moyenne/session (10+)", top(entries_avg)),
         ("🔄 Top 5 Sessions", top(entries_sessions)),
     ]:
-        if not entries or all(val==0 for _,val in entries):
-            value="aucune donnée"
+        if not entries or all(val == 0 for _, val in entries):
+            value = "aucune donnée"
         else:
-            lines=[]
-            for i,(uid,val) in enumerate(entries,start=1):
-                user=await bot.fetch_user(uid)
-                if isinstance(val,float):
-                    m,s=divmod(int(val),60)
-                    label=f"{m}m{s}s"
+            lines = []
+            for i, (uid, val) in enumerate(entries, start=1):
+                user = await bot.fetch_user(uid)
+                if isinstance(val, float):
+                    m, s = divmod(int(val), 60)
+                    label = f"{m}m{s}s"
                 else:
-                    label=str(val)
+                    label = str(val)
                 lines.append(f"{i}. {user.name} — {label}")
-            value="\n".join(lines)
+            value = "\n".join(lines)
         e.add_field(name=title, value=value, inline=False)
