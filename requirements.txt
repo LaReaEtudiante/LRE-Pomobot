@@ -3,3 +3,7 @@ python-dotenv
 aiosqlite
 tzdata
 pytz
+aiosqlite
+discord.py==2.2.3
+python-dotenv
+tzdata
