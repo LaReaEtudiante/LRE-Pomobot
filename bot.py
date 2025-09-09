@@ -99,7 +99,6 @@ def check_setup():
 
 def check_channel():
     async def predicate(ctx):
-        # allow admin, help, status, update, me anywhere
         if ctx.author.guild_permissions.administrator or ctx.command.name in ('status','help','update','me'):
             return True
         if ctx.channel.id == POMODORO_CHANNEL_ID:
@@ -130,7 +129,48 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str,int]:
         return 'pause', (60-m)*60 - sec
     return 'travail', 0
 
-# ─── ÉVÉNEMENTS ─────────────────────────────────────────────────────────────────
+# ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
+@tasks.loop(minutes=1)
+async def pomodoro_loop():
+    now    = datetime.now(timezone.utc)
+    minute = now.minute
+    chan   = bot.get_channel(POMODORO_CHANNEL_ID)
+    if not chan:
+        return
+
+    # Mode A
+    if PARTICIPANTS_A:
+        mention = (await ensure_role(chan.guild, POMO_ROLE_A)).mention
+        if minute == 0:
+            for uid in PARTICIPANTS_A:
+                await ajouter_temps(uid, chan.guild.id, BREAK_TIME_A*60, mode='A_break')
+            await chan.send(f"🔔 Mode A : début travail ({WORK_TIME_A} min) {mention}")
+        elif minute == WORK_TIME_A:
+            for uid in PARTICIPANTS_A:
+                await ajouter_temps(uid, chan.guild.id, WORK_TIME_A*60, mode='A', is_session_end=True)
+            await chan.send(f"☕ Mode A : début pause ({BREAK_TIME_A} min) {mention}")
+
+    # Mode B
+    if PARTICIPANTS_B:
+        mention = (await ensure_role(chan.guild, POMO_ROLE_B)).mention
+        if minute == 0:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id, BREAK_TIME_B*60, mode='B_break')
+            await chan.send(f"🔔 Mode B : début travail (25 min) {mention}")
+        elif minute == WORK_TIME_B:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
+            await chan.send(f"☕ Mode B : pause 1 ({BREAK_TIME_B} min) {mention}")
+        elif minute == WORK_TIME_B + BREAK_TIME_B:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id, BREAK_TIME_B*60, mode='B_break')
+            await chan.send(f"🔔 Mode B : deuxième travail (25 min) {mention}")
+        elif minute == 2*WORK_TIME_B + BREAK_TIME_B:
+            for uid in PARTICIPANTS_B:
+                await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
+            await chan.send(f"☕ Mode B : pause finale ({BREAK_TIME_B} min) {mention}")
+
+# ─── ÉVÉNEMENTS ────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     logger.info(f"{bot.user} connecté.")
@@ -383,4 +423,4 @@ async def leaderboard(ctx):
                     label=str(val)
                 lines.append(f"{i}. {user.name} — {label}")
             value="\n".join(lines)
-        e.add_field(name=title, value=value, inline=False
+        e.add_field(name=title, value=value, inline=False)
