@@ -384,3 +384,6 @@ async def leaderboard(ctx):
                 lines.append(f"{i}. {user.name} — {label}")
             value="\n".join(lines)
         e.add_field(name=title, value=value, inline=False)
+# ─── LANCEMENT ────────────────────────────────────────────────────────────────
+if __name__ == '__main__':
+    bot.run(TOKEN)
