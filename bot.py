@@ -1,13 +1,11 @@
 # bot.py
 
+# ─── IMPORTS ──────────────────────────────────────────────────────────────────
 from dotenv import load_dotenv
-import os
-import sys
-import asyncio
+import os, sys, asyncio, logging
 import discord
 from discord.ext import commands, tasks
 import configparser
-import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -18,12 +16,14 @@ from database import (
     init_db,
     ajouter_temps,
     get_all_stats,
-    classement_top10,
     add_participant,
     remove_participant,
     get_all_participants,
     get_daily_totals,
     get_weekly_sessions,
+    update_streak,
+    get_streak,
+    top_streaks,
 )
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -64,12 +64,9 @@ logger.addHandler(fh)
 PARTICIPANTS_A = set()
 PARTICIPANTS_B = set()
 
-# ─── EXCEPTIONS PERSONNALISÉES ──────────────────────────────────────────────────
-class SetupIncomplete(commands.CommandError):
-    pass
-
-class WrongChannel(commands.CommandError):
-    pass
+# ─── EXCEPTIONS ────────────────────────────────────────────────────────────────
+class SetupIncomplete(commands.CommandError): pass
+class WrongChannel(commands.CommandError): pass
 
 # ─── DÉCORATEURS UTILS ─────────────────────────────────────────────────────────
 def is_admin():
@@ -97,7 +94,7 @@ def check_setup():
 
 def check_channel():
     async def predicate(ctx):
-        # allow admin, help, status, update, me anywhere
+        # admin, help, status, update, me → utilisables partout
         if ctx.author.guild_permissions.administrator or ctx.command.name in ('status','help','update','me'):
             return True
         if ctx.channel.id == POMODORO_CHANNEL_ID:
@@ -113,6 +110,7 @@ async def ensure_role(guild: discord.Guild, name: str) -> discord.Role:
     return role
 
 def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str,int]:
+    """Retourne la phase (travail/pause) et le temps restant en secondes."""
     m, sec = now.minute, now.second
     if mode == 'A':
         if m < 50:
@@ -128,7 +126,7 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str,int]:
         return 'pause', (60-m)*60 - sec
     return 'travail', 0
 
-# ─── ÉVÉNEMENTS ─────────────────────────────────────────────────────────────────
+# ─── ÉVÉNEMENTS ────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
     logger.info(f"{bot.user} connecté.")
@@ -160,9 +158,7 @@ async def on_command_error(ctx, error):
 
 # ─── COMMANDES ÉTUDIANT ────────────────────────────────────────────────────────
 @bot.command(name='joinA', help='Rejoindre le mode A (50-10)')
-@check_maintenance()
-@check_setup()
-@check_channel()
+@check_maintenance() @check_setup() @check_channel()
 async def joinA(ctx):
     user = ctx.author
     if user.id in PARTICIPANTS_A | PARTICIPANTS_B:
@@ -175,9 +171,7 @@ async def joinA(ctx):
     await ctx.send(f"✅ {user.mention} a rejoint A → **{ph}**, reste {m} min {s} s")
 
 @bot.command(name='joinB', help='Rejoindre le mode B (25-5)')
-@check_maintenance()
-@check_setup()
-@check_channel()
+@check_maintenance() @check_setup() @check_channel()
 async def joinB(ctx):
     user = ctx.author
     if user.id in PARTICIPANTS_A | PARTICIPANTS_B:
@@ -190,49 +184,38 @@ async def joinB(ctx):
     await ctx.send(f"✅ {user.mention} a rejoint B → **{ph}**, reste {m} min {s} s")
 
 @bot.command(name='leave', help='Quitter la session Pomodoro')
-@check_maintenance()
-@check_setup()
-@check_channel()
+@check_maintenance() @check_setup() @check_channel()
 async def leave(ctx):
+    """Quand un utilisateur quitte : enregistrer temps + mettre à jour streak."""
     user = ctx.author
     join_ts, mode = await remove_participant(user.id, ctx.guild.id)
     if join_ts is None:
         return await ctx.send(f"🚫 {user.mention}, pas inscrit.")
     elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
-    if mode == 'A':
-        PARTICIPANTS_A.discard(user.id)
-    else:
-        PARTICIPANTS_B.discard(user.id)
+
+    if mode == 'A': PARTICIPANTS_A.discard(user.id)
+    else:           PARTICIPANTS_B.discard(user.id)
+
     role_name = POMO_ROLE_A if mode=='A' else POMO_ROLE_B
     role = discord.utils.get(ctx.guild.roles, name=role_name)
-    if role:
-        await user.remove_roles(role)
-    await ajouter_temps(
-        user.id,
-        ctx.guild.id,
-        elapsed,
-        mode=mode,
-        is_session_end=True
-    )
+    if role: await user.remove_roles(role)
+
+    await ajouter_temps(user.id, ctx.guild.id, elapsed, mode=mode, is_session_end=True)
+    await update_streak(ctx.guild.id, user.id)  # 🔥 mise à jour streak
+
     m, s = divmod(elapsed, 60)
     await ctx.send(f"👋 {user.mention} a quitté. +{m} min {s} s ajoutées.")
 
 @bot.command(name='me', help='Afficher vos stats personnelles')
-@check_maintenance()
-@check_setup()
-@check_channel()
+@check_maintenance() @check_setup() @check_channel()
 async def me(ctx):
-    user = ctx.author
-    guild_id = ctx.guild.id
+    """Affiche stats perso + streaks."""
+    user, guild_id = ctx.author, ctx.guild.id
 
-    # 1) Lire la session en cours (sans la supprimer)
+    # Session en cours
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute(
-            "SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?",
-            (guild_id, user.id)
-        )
+        cur = await db.execute("SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?", (guild_id, user.id))
         rec = await cur.fetchone()
-
     if rec:
         join_ts, mode = rec
         elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
@@ -241,386 +224,103 @@ async def me(ctx):
     else:
         status = "Pas en session actuellement"
 
-    # 2) Récupérer tous les champs de stats pour cet utilisateur
+    # Stats globales
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT total_seconds, work_seconds_A, break_seconds_A, work_seconds_B, break_seconds_B, session_count "
-            "FROM stats WHERE guild_id=? AND user_id=?",
-            (guild_id, user.id)
+            "FROM stats WHERE guild_id=? AND user_id=?", (guild_id, user.id)
         )
         row = await cur.fetchone()
+    if row: total_s, wA, bA, wB, bB, scount = row
+    else:   total_s = wA = bA = wB = bB = scount = 0
 
-    if row:
-        total_s, wA, bA, wB, bB, scount = row
-    else:
-        total_s = wA = bA = wB = bB = scount = 0
+    # Streaks
+    current_streak, best_streak = await get_streak(guild_id, user.id)
 
-    # 3) Construction de l'embed
-    embed = discord.Embed(
-        title=f"📋 Stats de {user.name}",
-        color=messages.MsgColors.AQUA.value
-    )
-    embed.add_field(name="Session en cours",     value=status,                    inline=False)
-    embed.add_field(name="Temps total",          value=f"{total_s//60} min {total_s%60} s", inline=False)
+    # Embed
+    embed = discord.Embed(title=f"📋 Stats de {user.name}", color=messages.MsgColors.AQUA.value)
+    embed.add_field(name="Session en cours", value=status, inline=False)
+    embed.add_field(name="Temps total", value=f"{total_s//60} min", inline=True)
     embed.add_field(name="Mode A travail / pause", value=f"{wA//60} min / {bA//60} min", inline=True)
     embed.add_field(name="Mode B travail / pause", value=f"{wB//60} min / {bB//60} min", inline=True)
-    embed.add_field(name="Nombre de sessions",   value=str(scount),               inline=True)
+    embed.add_field(name="Nombre de sessions", value=str(scount), inline=True)
     avg = (total_s / scount) if scount else 0
-    embed.add_field(name="Moyenne/session",      value=f"{int(avg)//60} min {int(avg)%60} s", inline=True)
+    embed.add_field(name="Moyenne/session", value=f"{int(avg)//60} min", inline=True)
+    embed.add_field(name="🔥 Streak actuel", value=f"{current_streak} jours", inline=True)
+    embed.add_field(name="🌟 Meilleur streak", value=f"{best_streak} jours", inline=True)
 
     await ctx.send(embed=embed)
 
-@bot.command(name='status', help='Afficher état global du bot')
-async def status(ctx):
-    # Latence et heure locale
-    latency = round(bot.latency * 1000)
-    now_utc = datetime.now(timezone.utc)
-    try:
-        local = now_utc.astimezone(ZoneInfo('Europe/Zurich'))
-    except ZoneInfoNotFoundError:
-        local = now_utc.astimezone()
-    local_str = local.strftime("%Y-%m-%d %H:%M:%S")
-
-    # Phases et temps restants
-    phA, rA = get_phase_and_remaining(now_utc, 'A')
-    phB, rB = get_phase_and_remaining(now_utc, 'B')
-    mA, sA = divmod(rA, 60)
-    mB, sB = divmod(rB, 60)
-
-    # Comptage participants
-    countA = len(PARTICIPANTS_A)
-    countB = len(PARTICIPANTS_B)
-
-    # Configuration canal & rôles
-    chan = bot.get_channel(POMODORO_CHANNEL_ID)
-    chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
-    guild       = ctx.guild
-    roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
-    roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
-    roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
-    roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
-
-    # --- Récupérer le SHA Git court ---
-    proc = await asyncio.create_subprocess_shell(
-        "git rev-parse --short HEAD",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL
-    )
-    out, _ = await proc.communicate()
-    sha = out.decode().strip() if out else "unknown"
-
-    # --- Lire le fichier VERSION ---
-    try:
-        with open("VERSION", encoding="utf-8") as f:
-            file_ver = f.read().strip()
-    except FileNotFoundError:
-        file_ver = "unknown"
-
-    # --- Construction de l'embed ---
-    e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
-    e.add_field(name="Latence",          value=f"{latency} ms",                     inline=True)
-    e.add_field(name="Heure (Lausanne)", value=local_str,                          inline=True)
-    e.add_field(name="Mode A",           value=f"{countA} participants en **{phA}** pour {mA} min {sA} s", inline=False)
-    e.add_field(name="Mode B",           value=f"{countB} participants en **{phB}** pour {mB} min {sB} s", inline=False)
-    e.add_field(name="Canal Pomodoro",   value=chan_field,                         inline=False)
-    e.add_field(name="Rôle A",           value=roleA_field,                        inline=False)
-    e.add_field(name="Rôle B",           value=roleB_field,                        inline=False)
-    e.add_field(name="Version (SHA)",    value=sha,                                inline=True)
-    e.add_field(name="Version (fichier)",value=file_ver,                           inline=True)
-
-    await ctx.send(embed=e)
-
-@bot.command(name='stats', help='Afficher stats du serveur')
-@check_maintenance()
-@check_setup()
-@check_channel()
-async def stats(ctx):
-    guild_id = ctx.guild.id
-
-    # a) Stats globales existantes
-    data    = await get_all_stats(guild_id)
-    unique  = len(data)
-    total_s = sum(r[2] for r in data)            # total_seconds en position 2
-    avg     = (total_s/unique) if unique else 0
-
-    # b) Totaux journaliers (7 derniers jours)
-    daily = await get_daily_totals(guild_id, days=7)
-    daily_str = "\n".join(f"{day}: {secs//60} m" for day, secs in daily) or "aucune donnée"
-
-    # c) Sessions par semaine (4 dernières semaines)
-    weekly = await get_weekly_sessions(guild_id, weeks=4)
-    weekly_str = "\n".join(f"{yw}: {count}" for yw, count in weekly) or "aucune donnée"
-
-    # --- Construction de l’embed ---
-    e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
-    e.add_field(name="Utilisateurs uniques",      value=str(unique),               inline=False)
-    e.add_field(name="Temps total (min)",         value=f"{total_s/60:.1f}",      inline=False)
-    e.add_field(name="Moyenne/utilisateur (min)", value=f"{avg/60:.1f}",          inline=False)
-
-    # Nouvelles sections
-    e.add_field(name="📅 Totaux 7 jours",          value=daily_str,                 inline=False)
-    e.add_field(name="🗓 Sessions / semaine",      value=weekly_str,                inline=False)
-
-    await ctx.send(embed=e)
-
-@bot.command(
-    name='leaderboard',
-    help='Top contributeurs : *leaderboard [overall|A|B|pause|sessions|avg]'
-)
-@check_maintenance()
-@check_setup()
-@check_channel()
+@bot.command(name='leaderboard', help='Classements Pomodoro')
+@check_maintenance() @check_setup() @check_channel()
 async def leaderboard(ctx, category: str = "overall"):
-    guild_id = ctx.guild.id
-    cat = category.lower()
-
+    """Top contributeurs (global, A, B, sessions, moyenne, streaks)."""
+    guild_id, cat = ctx.guild.id, category.lower()
     title_map = {
-        "overall":  ("🏆 Top global",           None),
-        "A":        ("🥇 Top Mode A",          "A"),
-        "B":        ("🥈 Top Mode B",          "B"),
-        "pause":    ("☕ Top pauses",          "pause"),
-        "sessions": ("🔄 Top sessions",        "sessions"),
-        "avg":      ("📊 Top moyenne/session","avg")
+        "overall": ("🏆 Top global", None),
+        "A": ("🥇 Top Mode A", "A"),
+        "B": ("🥈 Top Mode B", "B"),
+        "sessions": ("🔄 Top sessions", "sessions"),
+        "avg": ("📊 Top moyenne/session", "avg"),
+        "streaks": ("🔥 Top streaks", "streaks"),
     }
-
     if cat not in title_map:
-        noms = ", ".join(title_map.keys())
-        return await ctx.send(f"⚠️ Catégorie invalide : choisissez parmi {noms}.")
+        return await ctx.send(f"⚠️ Catégorie invalide. Choisissez parmi {', '.join(title_map)}.")
 
     title, key = title_map[cat]
-    rows = await get_all_stats(guild_id)
-    # rows = [(user_id, seconds, total_seconds, wA, bA, wB, bB, scount), ...]
-
-    # Construire la liste des tuples selon cat
-    entries = []
-    for (uid, _, total, wA, bA, wB, bB, sc) in rows:
-        if cat == "overall":
-            score = total
-            label = f"{score/60:.1f} min"
-        elif cat == "A":
-            score = wA
-            label = f"{wA/60:.1f} / {bA/60:.1f} min"
-        elif cat == "B":
-            score = wB
-            label = f"{wB/60:.1f} / {bB/60:.1f} min"
-        elif cat == "pause":
-            score = bA + bB
-            label = f"{(bA+bB)/60:.1f} min"
-        elif cat == "sessions":
-            score = sc
-            label = f"{score} sessions"
-        else:  # avg
-            score = (total / sc) if sc else 0
-            m, s = divmod(int(score), 60)
-            label = f"{m} min {s} s"
-        entries.append((uid, score, label))
-
-    # Trier et garder top5
-    entries.sort(key=lambda x: x[1], reverse=True)
-    top5 = entries[:5]
-
-    # Préparer l'embed
     e = discord.Embed(title=title, color=messages.LEADERBOARD["color"])
-    if not top5 or all(score == 0 for _,score,_ in top5):
-        e.description = "Aucun contributeur pour cette catégorie."
-    else:
-        for i, (uid, _, label) in enumerate(top5, start=1):
+
+    if cat == "streaks":
+        rows = await top_streaks(guild_id, limit=5)
+        for i, (uid, curr, best) in enumerate(rows, start=1):
             user = await bot.fetch_user(uid)
-            name = messages.LEADERBOARD["entry_template"]["name_template"].format(
-                rank=i, username=user.name
-            )
-            e.add_field(name=name, value=label, inline=False)
+            e.add_field(name=f"{i}. {user.name}", value=f"{curr} jours (best {best})", inline=False)
+    else:
+        rows = await get_all_stats(guild_id)
+        entries = []
+        for (uid, _, total, wA, bA, wB, bB, sc) in rows:
+            if cat=="overall": score,label=total,f"{total/60:.1f} min"
+            elif cat=="A":     score,label=wA,f"{wA/60:.1f} / {bA/60:.1f} min"
+            elif cat=="B":     score,label=wB,f"{wB/60:.1f} / {bB/60:.1f} min"
+            elif cat=="sessions": score,label=sc,f"{sc} sessions"
+            else: score=(total/sc) if sc else 0; m,s=divmod(int(score),60); label=f"{m} min {s} s"
+            entries.append((uid, score, label))
+        entries.sort(key=lambda x: x[1], reverse=True)
+        for i,(uid,_,label) in enumerate(entries[:5], start=1):
+            user = await bot.fetch_user(uid)
+            e.add_field(name=f"{i}. {user.name}", value=label, inline=False)
 
     await ctx.send(embed=e)
-
-# ─── COMMANDES ADMIN ───────────────────────────────────────────────────────────
-@bot.command(name='help', help='Afficher l’aide')
-async def help_cmd(ctx):
-    e = discord.Embed(title=messages.HELP["title"], color=messages.HELP["color"])
-    for f in messages.HELP["fields"]:
-        e.add_field(name=f["name"], value=f["value"], inline=f["inline"])
-    await ctx.send(embed=e)
-
-@bot.command(name='maintenance', help='Activer/Désactiver maintenance')
-@is_admin()
-async def maintenance(ctx):
-    global MAINTENANCE_MODE
-    MAINTENANCE_MODE = not MAINTENANCE_MODE
-    state = "activée" if MAINTENANCE_MODE else "désactivée"
-    await ctx.send(messages.TEXT["maintenance_toggle"].format(state=state))
-
-@bot.command(name='set_channel', help='Définir le salon Pomodoro')
-@is_admin()
-async def set_channel(ctx, channel: discord.TextChannel):
-    config['CURRENT_SETTINGS']['channel_id'] = str(channel.id)
-    with open('settings.ini','w') as f: config.write(f)
-    global POMODORO_CHANNEL_ID
-    POMODORO_CHANNEL_ID = channel.id
-    await ctx.send(messages.TEXT["set_channel"].format(channel_mention=channel.mention))
-
-@bot.command(name='set_role_A', help='Définir le rôle A')
-@is_admin()
-async def set_role_A(ctx, role: discord.Role = None):
-    global POMO_ROLE_A
-    if role is None:
-        # proposer rôle existant ou création
-        existing = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_A)
-        if existing:
-            await ctx.send(f"🎛️ Rôle existant {existing.mention}, voulez-vous l'utiliser ? (oui/non)")
-            try:
-                msg = await bot.wait_for('message', check=lambda m: m.author==ctx.author and m.channel==ctx.channel, timeout=60)
-            except asyncio.TimeoutError:
-                return await ctx.send("⏱️ Délai écoulé.")
-            if msg.content.lower() in ('oui','o','yes','y'):
-                config['CURRENT_SETTINGS']['pomodoro_role_A'] = existing.name
-                with open('settings.ini','w') as f: config.write(f)
-                POMO_ROLE_A = existing.name
-                return await ctx.send(f"✅ Rôle A configuré : {existing.mention}")
-        # création
-        await ctx.send(f"⚙️ Créer rôle `{POMO_ROLE_A}` ? (oui/non)")
-        try:
-            msg2 = await bot.wait_for('message', check=lambda m: m.author==ctx.author and m.channel==ctx.channel, timeout=60)
-        except asyncio.TimeoutError:
-            return await ctx.send("⏱️ Délai écoulé.")
-        if msg2.content.lower() in ('oui','o','yes','y'):
-            new = await ensure_role(ctx.guild, POMO_ROLE_A)
-            config['CURRENT_SETTINGS']['pomodoro_role_A'] = new.name
-            with open('settings.ini','w') as f: config.write(f)
-            POMO_ROLE_A = new.name
-            return await ctx.send(f"✅ Rôle A créé et configuré : {new.mention}")
-        return await ctx.send("❌ Aucun rôle configuré.")
-    # si rôle en argument
-    config['CURRENT_SETTINGS']['pomodoro_role_A'] = role.name
-    with open('settings.ini','w') as f: config.write(f)
-    POMO_ROLE_A = role.name
-    await ctx.send(messages.TEXT["set_role_A"].format(role_mention=role.mention))
-
-@bot.command(name='set_role_B', help='Définir le rôle B')
-@is_admin()
-async def set_role_B(ctx, role: discord.Role = None):
-    global POMO_ROLE_B
-    if role is None:
-        existing = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_B)
-        if existing:
-            await ctx.send(f"🎛️ Rôle existant {existing.mention}, voulez-vous l'utiliser ? (oui/non)")
-            try:
-                msg = await bot.wait_for('message', check=lambda m: m.author==ctx.author and m.channel==ctx.channel, timeout=60)
-            except asyncio.TimeoutError:
-                return await ctx.send("⏱️ Délai écoulé.")
-            if msg.content.lower() in ('oui','o','yes','y'):
-                config['CURRENT_SETTINGS']['pomodoro_role_B'] = existing.name
-                with open('settings.ini','w') as f: config.write(f)
-                POMO_ROLE_B = existing.name
-                return await ctx.send(f"✅ Rôle B configuré : {existing.mention}")
-        await ctx.send(f"⚙️ Créer rôle `{POMO_ROLE_B}` ? (oui/non)")
-        try:
-            msg2 = await bot.wait_for('message', check=lambda m: m.author==ctx.author and m.channel==ctx.channel, timeout=60)
-        except asyncio.TimeoutError:
-            return await ctx.send("⏱️ Délai écoulé.")
-        if msg2.content.lower() in ('oui','o','yes','y'):
-            new = await ensure_role(ctx.guild, POMO_ROLE_B)
-            config['CURRENT_SETTINGS']['pomodoro_role_B'] = new.name
-            with open('settings.ini','w') as f: config.write(f)
-            POMO_ROLE_B = new.name
-            return await ctx.send(f"✅ Rôle B créé et configuré : {new.mention}")
-        return await ctx.send("❌ Aucun rôle configuré.")
-    config['CURRENT_SETTINGS']['pomodoro_role_B'] = role.name
-    with open('settings.ini','w') as f: config.write(f)
-    POMO_ROLE_B = role.name
-    await ctx.send(messages.TEXT["set_role_B"].format(role_mention=role.mention))
-
-@bot.command(name='clear_stats', help='Réinitialiser toutes les stats')
-@is_admin()
-async def clear_stats(ctx):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM stats WHERE guild_id=?", (ctx.guild.id,))
-        await db.commit()
-    await ctx.send(messages.TEXT["clear_stats"])
-
-@bot.command(name='update', help='Pull GitHub & redémarrer')
-@is_admin()
-async def update(ctx):
-    if not os.path.isdir('.git'):
-        return await ctx.send("❌ Pas de dépôt Git ici.")
-    await ctx.send("🔄 Pull depuis origin/main…")
-    proc = await asyncio.create_subprocess_shell(
-        "git pull origin main",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    out, err = await proc.communicate()
-    msg = ""
-    if out:
-        msg += f"```prolog\n{out.decode().strip()}\n```"
-    if err:
-        msg += f"```diff\n{err.decode().strip()}\n```"
-    await ctx.send(msg or "✅ Déjà à jour.")
-    await ctx.send("⏹️ Redémarrage…")
-    await bot.close()
-    sys.exit(0)
 
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
 @tasks.loop(minutes=1)
 async def pomodoro_loop():
-    now    = datetime.now(timezone.utc)
-    minute = now.minute
-    chan   = bot.get_channel(POMODORO_CHANNEL_ID)
-    if not chan:
-        return
+    """Boucle d’enregistrement automatique A/B + streak update."""
+    now, minute = datetime.now(timezone.utc), datetime.now(timezone.utc).minute
+    chan = bot.get_channel(POMODORO_CHANNEL_ID)
+    if not chan: return
 
-    # ── MODE A ───────────────────────────────
+    # MODE A
     if PARTICIPANTS_A:
         mention = (await ensure_role(chan.guild, POMO_ROLE_A)).mention
-
-        if minute == 0:
-            # fin de la pause A → on enregistre 10 min de pause
+        if minute == WORK_TIME_A:
             for uid in PARTICIPANTS_A:
-                await ajouter_temps(uid, chan.guild.id,
-                                    BREAK_TIME_A*60,
-                                    mode='A_break')
-            await chan.send(f"🔔 Mode A : début travail ({WORK_TIME_A} min) {mention}")
+                await ajouter_temps(uid, chan.guild.id, WORK_TIME_A*60, mode='A', is_session_end=True)
+                await update_streak(chan.guild.id, uid)  # 🔥 streak
+            await chan.send(f"☕ Mode A : pause ({BREAK_TIME_A} min) {mention}")
 
-        elif minute == WORK_TIME_A:
-            # fin du travail A → on enregistre 50 min de travail
-            for uid in PARTICIPANTS_A:
-                await ajouter_temps(uid, chan.guild.id,
-                                    WORK_TIME_A*60,
-                                    mode='A',
-                                    is_session_end=True)
-            await chan.send(f"☕ Mode A : début pause ({BREAK_TIME_A} min) {mention}")
-
-    # ── MODE B ───────────────────────────────
+    # MODE B
     if PARTICIPANTS_B:
         mention = (await ensure_role(chan.guild, POMO_ROLE_B)).mention
-
-        if minute == 0:
+        if minute == WORK_TIME_B:
             for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id,
-                                    BREAK_TIME_B*60,
-                                    mode='B_break')
-            await chan.send(f"🔔 Mode B : début travail (25 min) {mention}")
-
-        elif minute == WORK_TIME_B:
-            for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id,
-                                    WORK_TIME_B*60,
-                                    mode='B',
-                                    is_session_end=True)
+                await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
+                await update_streak(chan.guild.id, uid)  # 🔥 streak
             await chan.send(f"☕ Mode B : pause 1 ({BREAK_TIME_B} min) {mention}")
-
-        elif minute == WORK_TIME_B + BREAK_TIME_B:
-            for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id,
-                                    BREAK_TIME_B*60,
-                                    mode='B_break')
-            await chan.send(f"🔔 Mode B : deuxième travail (25 min) {mention}")
-
         elif minute == 2*WORK_TIME_B + BREAK_TIME_B:
             for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id,
-                                    WORK_TIME_B*60,
-                                    mode='B',
-                                    is_session_end=True)
+                await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
+                await update_streak(chan.guild.id, uid)  # 🔥 streak
             await chan.send(f"☕ Mode B : pause finale ({BREAK_TIME_B} min) {mention}")
 
 # ─── LANCEMENT ────────────────────────────────────────────────────────────────
