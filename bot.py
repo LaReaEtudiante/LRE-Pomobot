@@ -132,6 +132,8 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str,int]:
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
 @tasks.loop(minutes=1)
 async def pomodoro_loop():
+    if POMODORO_CHANNEL_ID is None:
+        return
     now    = datetime.now(timezone.utc)
     minute = now.minute
     chan   = bot.get_channel(POMODORO_CHANNEL_ID)
@@ -186,8 +188,11 @@ async def on_command_error(ctx, error):
     if isinstance(error, SetupIncomplete):
         return await ctx.send(messages.TEXT["setup_incomplete"])
     if isinstance(error, WrongChannel):
-        ch = bot.get_channel(POMODORO_CHANNEL_ID)
-        return await ctx.send(f"❌ Utilisez {ch.mention}.")
+        if POMODORO_CHANNEL_ID is not None:
+            ch = bot.get_channel(POMODORO_CHANNEL_ID)
+            if ch:
+                return await ctx.send(f"❌ Utilisez {ch.mention}.")
+        return await ctx.send("❌ Canal Pomodoro non configuré.")
     key = (
         "command_not_found"   if isinstance(error, commands.CommandNotFound) else
         "maintenance_active"  if isinstance(error, commands.CommandError) and str(error)=="Bot en mode maintenance." else
@@ -253,7 +258,7 @@ async def leave(ctx):
         user.id,
         ctx.guild.id,
         elapsed,
-        mode=mode,
+        mode=mode or '',
         is_session_end=True
     )
     m, s = divmod(elapsed, 60)
@@ -331,7 +336,7 @@ async def status(ctx):
     mB, sB = divmod(rB, 60)
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
-    chan = bot.get_channel(POMODORO_CHANNEL_ID)
+    chan = bot.get_channel(POMODORO_CHANNEL_ID) if POMODORO_CHANNEL_ID else None
     chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
     guild       = ctx.guild
     roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
@@ -426,5 +431,8 @@ async def leaderboard(ctx):
         e.add_field(name=title, value=value, inline=False)
 # Lancement du bot -----------------------------------------------------------------------------------------
 if __name__ == '__main__':
+    if TOKEN is None:
+        print("❌ DISCORD_TOKEN environment variable is missing!")
+        exit(1)
     bot.run(TOKEN)
 
