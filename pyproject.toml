@@ -5,10 +5,10 @@ description = ""
 authors = ["Tekilp"]
 requires-python = ">=3.11"
 dependencies = [
-    "discord-py>=2.5.2",
-    "flask>=3.1.0",
+    "discord.py>=2.2.3",
     "python-dotenv>=1.1.0",
-    "timer>=0.3.0",
+    "aiosqlite>=0.19.0",
+    "tzdata>=2023.3",
 ]
 [tool.replit]
 run = "python3 bot.py"
