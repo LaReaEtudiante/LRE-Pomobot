@@ -221,7 +221,7 @@ async def joinA(ctx):
     m, s = divmod(rem, 60)
     await ctx.send(f"✅ {user.mention} a rejoint A → **{ph}**, reste {m} min {s} s")
 
-@bot.command(name='joinB', help='Rejoindre le mode B (25-5)')
+@bot.command(name='joinB', help='Rejoindre le mode B (25-5-25-5)')
 @check_maintenance()
 @check_setup()
 @check_channel()
@@ -254,13 +254,7 @@ async def leave(ctx):
     role = discord.utils.get(ctx.guild.roles, name=role_name)
     if role:
         await user.remove_roles(role)
-    await ajouter_temps(
-        user.id,
-        ctx.guild.id,
-        elapsed,
-        mode=mode or '',
-        is_session_end=True
-    )
+    await ajouter_temps(user.id, ctx.guild.id, elapsed, mode=mode, is_session_end=True)
     m, s = divmod(elapsed, 60)
     await ctx.send(f"👋 {user.mention} a quitté. +{m} min {s} s ajoutées.")
 
@@ -272,14 +266,13 @@ async def me(ctx):
     user = ctx.author
     guild_id = ctx.guild.id
 
-    # 1) Lire la session en cours (sans la supprimer)
+    # Session en cours ?
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?",
             (guild_id, user.id)
         )
         rec = await cur.fetchone()
-
     if rec:
         join_ts, mode = rec
         elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
@@ -288,7 +281,7 @@ async def me(ctx):
     else:
         status = "Pas en session actuellement"
 
-    # 2) Récup stats
+    # Stats
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT total_seconds, work_seconds_A, break_seconds_A, work_seconds_B, break_seconds_B, session_count "
@@ -301,24 +294,20 @@ async def me(ctx):
     else:
         total_s = wA = bA = wB = bB = scount = 0
 
-    # 3) Streaks
+    # Streaks
     cs, bs = await get_streak(guild_id, user.id)
 
-    # 4) Embed
-    embed = discord.Embed(
-        title=f"📋 Stats de {user.name}",
-        color=messages.MsgColors.AQUA.value
-    )
+    # Embed
+    embed = discord.Embed(title=f"📋 Stats de {user.name}", color=messages.MsgColors.AQUA.value)
     embed.add_field(name="Session en cours", value=status, inline=False)
     embed.add_field(name="Temps total", value=f"{total_s//60} min {total_s%60} s", inline=False)
-    embed.add_field(name="Mode A travail / pause", value=f"{wA//60} / {bA//60} min", inline=True)
-    embed.add_field(name="Mode B travail / pause", value=f"{wB//60} / {bB//60} min", inline=True)
+    embed.add_field(name="Mode A travail/pause", value=f"{wA//60}/{bA//60} min", inline=True)
+    embed.add_field(name="Mode B travail/pause", value=f"{wB//60}/{bB//60} min", inline=True)
     embed.add_field(name="Nombre de sessions", value=str(scount), inline=True)
     avg = (total_s / scount) if scount else 0
     embed.add_field(name="Moyenne/session", value=f"{int(avg)//60} min {int(avg)%60} s", inline=True)
     embed.add_field(name="🔥 Streak actuel", value=f"{cs} jours", inline=True)
     embed.add_field(name="🏅 Meilleur streak", value=f"{bs} jours", inline=True)
-
     await ctx.send(embed=embed)
 
 @bot.command(name='status', help='Afficher état global du bot')
@@ -336,7 +325,7 @@ async def status(ctx):
     mB, sB = divmod(rB, 60)
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
-    chan = bot.get_channel(POMODORO_CHANNEL_ID) if POMODORO_CHANNEL_ID else None
+    chan = bot.get_channel(POMODORO_CHANNEL_ID)
     chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
     guild       = ctx.guild
     roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
@@ -355,12 +344,11 @@ async def status(ctx):
             file_ver = f.read().strip()
     except FileNotFoundError:
         file_ver = "unknown"
-
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
     e.add_field(name="Latence", value=f"{latency} ms", inline=True)
     e.add_field(name="Heure (Lausanne)", value=local_str, inline=True)
-    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {mA}m {sA}s", inline=False)
-    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {mB}m {sB}s", inline=False)
+    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {mA}m{sA}s", inline=False)
+    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {mB}m{sB}s", inline=False)
     e.add_field(name="Canal Pomodoro", value=chan_field, inline=False)
     e.add_field(name="Rôle A", value=roleA_field, inline=False)
     e.add_field(name="Rôle B", value=roleB_field, inline=False)
@@ -397,17 +385,23 @@ async def stats(ctx):
 async def leaderboard(ctx):
     guild_id = ctx.guild.id
     rows = await get_all_stats(guild_id)
+
+    # Extraire les entrées utiles
     entries_overall = [(uid, total) for (uid, _, total, *_ ) in rows]
     entries_A = [(uid, wA) for (uid, _, _, wA, _, _, _, _) in rows]
     entries_B = [(uid, wB) for (uid, _, _, _, _, wB, _, _) in rows]
     entries_avg = [
-        (uid, (total/sc) if sc>=10 else 0)
+        (uid, (total/sc) if sc >= 10 else 0)
         for (uid, _, total, _, _, _, _, sc) in rows
     ]
     entries_sessions = [(uid, sc) for (uid, _, _, _, _, _, _, sc) in rows]
+
     def top(entries, n=5):
-        return sorted(entries, key=lambda x:x[1], reverse=True)[:n]
+        return sorted(entries, key=lambda x: x[1], reverse=True)[:n]
+
     e = discord.Embed(title="🏆 Leaderboard", color=messages.LEADERBOARD["color"])
+
+    # Classements principaux
     for title, entries in [
         ("🌍 Top 10 Global", top(entries_overall, 10)),
         ("🥇 Top 5 Mode A", top(entries_A)),
@@ -429,6 +423,17 @@ async def leaderboard(ctx):
                 lines.append(f"{i}. {user.name} — {label}")
             value = "\n".join(lines)
         e.add_field(name=title, value=value, inline=False)
+
+    # Classement streaks
+    streaks = await top_streaks(guild_id, limit=5)
+    if streaks:
+        lines = []
+        for i, (uid, cur, best) in enumerate(streaks, start=1):
+            user = await bot.fetch_user(uid)
+            lines.append(f"{i}. {user.name} — 🔥 {cur} jours (best {best})")
+        e.add_field(name="🔥 Top 5 Streaks", value="\n".join(lines), inline=False)
+
+    await ctx.send(embed=e)
 # Lancement du bot -----------------------------------------------------------------------------------------
 if __name__ == '__main__':
     if TOKEN is None:
