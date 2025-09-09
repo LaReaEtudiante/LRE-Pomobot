@@ -98,7 +98,6 @@ def check_setup():
 
 def check_channel():
     async def predicate(ctx):
-        # allow admin, help, status, update, me anywhere
         if ctx.author.guild_permissions.administrator or ctx.command.name in ('status','help','update','me'):
             return True
         if ctx.channel.id == POMODORO_CHANNEL_ID:
@@ -159,7 +158,7 @@ async def on_command_error(ctx, error):
     )
     await ctx.send(text)
 
-# ─── COMMANDES ÉTUDIANT ────────────────────────────────────────────────────────
+# ─── COMMANDES MEMBRES ─────────────────────────────────────────────────────────
 @bot.command(name='joinA', help='Rejoindre le mode A (50-10)')
 @check_maintenance()
 @check_setup()
@@ -226,7 +225,7 @@ async def me(ctx):
     user = ctx.author
     guild_id = ctx.guild.id
 
-    # 1) Lire la session en cours (sans la supprimer)
+    # session en cours
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?",
@@ -242,7 +241,7 @@ async def me(ctx):
     else:
         status = "Pas en session actuellement"
 
-    # 2) Récup stats
+    # stats globales
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT total_seconds, work_seconds_A, break_seconds_A, work_seconds_B, break_seconds_B, session_count "
@@ -250,137 +249,151 @@ async def me(ctx):
             (guild_id, user.id)
         )
         row = await cur.fetchone()
+
     if row:
         total_s, wA, bA, wB, bB, scount = row
     else:
         total_s = wA = bA = wB = bB = scount = 0
 
-    # 3) Streaks
+    # streaks
     current_streak, best_streak = await get_streak(guild_id, user.id)
 
-    # 4) Embed
-    embed = discord.Embed(
-        title=f"📋 Stats de {user.name}",
-        color=messages.MsgColors.AQUA.value
-    )
+    # embed
+    embed = discord.Embed(title=f"📋 Stats de {user.name}", color=messages.MsgColors.AQUA.value)
     embed.add_field(name="Session en cours", value=status, inline=False)
-    embed.add_field(name="Temps total", value=f"{total_s//60} min", inline=True)
+    embed.add_field(name="Temps total", value=f"{total_s//60} min", inline=False)
     embed.add_field(name="Mode A (travail/pause)", value=f"{wA//60} / {bA//60} min", inline=True)
     embed.add_field(name="Mode B (travail/pause)", value=f"{wB//60} / {bB//60} min", inline=True)
     embed.add_field(name="Nombre de sessions", value=str(scount), inline=True)
     avg = (total_s / scount) if scount else 0
-    embed.add_field(name="Moyenne/session", value=f"{int(avg)//60} min", inline=True)
+    embed.add_field(name="Moyenne/session", value=f"{int(avg)//60} min {int(avg)%60} s", inline=True)
     embed.add_field(name="🔥 Streak actuel", value=f"{current_streak} jours", inline=True)
     embed.add_field(name="🏅 Meilleur streak", value=f"{best_streak} jours", inline=True)
 
     await ctx.send(embed=embed)
 
-# ─── LEADERBOARD ───────────────────────────────────────────────────────────────
-@bot.command(name='leaderboard', help='Afficher le classement')
+@bot.command(name='status', help="Afficher l'état global du bot")
+async def status(ctx):
+    latency = round(bot.latency * 1000)
+    now_utc = datetime.now(timezone.utc)
+    try:
+        local = now_utc.astimezone(ZoneInfo('Europe/Zurich'))
+    except ZoneInfoNotFoundError:
+        local = now_utc.astimezone()
+    local_str = local.strftime("%Y-%m-%d %H:%M:%S")
+
+    phA, rA = get_phase_and_remaining(now_utc, 'A')
+    phB, rB = get_phase_and_remaining(now_utc, 'B')
+    mA, sA = divmod(rA, 60)
+    mB, sB = divmod(rB, 60)
+
+    countA = len(PARTICIPANTS_A)
+    countB = len(PARTICIPANTS_B)
+
+    chan = bot.get_channel(POMODORO_CHANNEL_ID)
+    chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
+    guild       = ctx.guild
+    roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
+    roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
+    roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
+    roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
+
+    proc = await asyncio.create_subprocess_shell(
+        "git rev-parse --short HEAD",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    out, _ = await proc.communicate()
+    sha = out.decode().strip() if out else "unknown"
+
+    try:
+        with open("VERSION", encoding="utf-8") as f:
+            file_ver = f.read().strip()
+    except FileNotFoundError:
+        file_ver = "unknown"
+
+    e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
+    e.add_field(name="Latence", value=f"{latency} ms", inline=True)
+    e.add_field(name="Heure (Lausanne)", value=local_str, inline=True)
+    e.add_field(name="Mode A", value=f"{countA} en **{phA}** ({mA}m{sA}s)", inline=False)
+    e.add_field(name="Mode B", value=f"{countB} en **{phB}** ({mB}m{sB}s)", inline=False)
+    e.add_field(name="Canal", value=chan_field, inline=False)
+    e.add_field(name="Rôle A", value=roleA_field, inline=False)
+    e.add_field(name="Rôle B", value=roleB_field, inline=False)
+    e.add_field(name="Version (SHA)", value=sha, inline=True)
+    e.add_field(name="Version fichier", value=file_ver, inline=True)
+
+    await ctx.send(embed=e)
+
+@bot.command(name='stats', help='Afficher stats du serveur')
 @check_maintenance()
 @check_setup()
 @check_channel()
-async def leaderboard(ctx):
+async def stats(ctx):
     guild_id = ctx.guild.id
+    data    = await get_all_stats(guild_id)
+    unique  = len(data)
+    total_s = sum(r[2] for r in data)
+    avg     = (total_s/unique) if unique else 0
+
+    daily = await get_daily_totals(guild_id, days=7)
+    daily_str = "\n".join(f"{day}: {secs//60} m" for day, secs in daily) or "aucune donnée"
+
+    weekly = await get_weekly_sessions(guild_id, weeks=4)
+    weekly_str = "\n".join(f"{yw}: {count}" for yw, count in weekly) or "aucune donnée"
+
+    e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
+    e.add_field(name="Utilisateurs uniques", value=str(unique), inline=False)
+    e.add_field(name="Temps total (min)", value=f"{total_s/60:.1f}", inline=False)
+    e.add_field(name="Moyenne/utilisateur (min)", value=f"{avg/60:.1f}", inline=False)
+    e.add_field(name="📅 Totaux 7 jours", value=daily_str, inline=False)
+    e.add_field(name="🗓 Sessions / semaine", value=weekly_str, inline=False)
+
+    await ctx.send(embed=e)
+
+@bot.command(name='leaderboard', help='Classements (overall, A, B, pause, sessions, avg, streaks)')
+@check_maintenance()
+@check_setup()
+@check_channel()
+async def leaderboard(ctx, category: str = "overall"):
+    guild_id = ctx.guild.id
+    cat = category.lower()
+
+    title_map = {
+        "overall":  "🏆 Top global",
+        "a":        "🥇 Top Mode A",
+        "b":        "🥈 Top Mode B",
+        "pause":    "☕ Top pauses",
+        "sessions": "🔄 Top sessions",
+        "avg":      "📊 Top moy/session",
+        "streaks":  "🔥 Top streaks"
+    }
+    if cat not in title_map:
+        noms = ", ".join(title_map.keys())
+        return await ctx.send(f"⚠️ Catégorie invalide. Choisissez parmi: {noms}")
+
+    e = discord.Embed(title=title_map[cat], color=messages.LEADERBOARD["color"])
     rows = await get_all_stats(guild_id)
 
-    # Préparer scores
-    overall = sorted(rows, key=lambda r: r[2], reverse=True)[:10]  # total_seconds
-    modeA   = sorted(rows, key=lambda r: r[3], reverse=True)[:5]   # work_seconds_A
-    modeB   = sorted(rows, key=lambda r: r[5], reverse=True)[:5]   # work_seconds_B
-    avglist = [r for r in rows if r[7] >= 10]                      # après 10 sessions
-    avg     = sorted(avglist, key=lambda r: (r[2]/r[7]), reverse=True)[:5] if avglist else []
-    streaks = await top_streaks(guild_id, limit=5)
-
-    e = discord.Embed(title="🏆 Leaderboard", color=messages.LEADERBOARD["color"])
-
-    def format_entry(rank, uid, val, suffix=""):
-        return f"**#{rank}** <@{uid}> — {val}{suffix}"
-
-    # Top global
-    if overall:
-        lines = [format_entry(i+1, uid, f"{secs//60} min") for i,(uid,_,secs,_,_,_,_,_) in enumerate(overall)]
-        e.add_field(name="🌍 Top 10 global", value="\n".join(lines), inline=False)
-
-    # Top A
-    if modeA:
-        lines = [format_entry(i+1, uid, f"{secs//60} min") for i,(uid,_,_,secs,_,_,_,_) in enumerate(modeA)]
-        e.add_field(name="🅰️ Top 5 Mode A", value="\n".join(lines), inline=True)
-
-    # Top B
-    if modeB:
-        lines = [format_entry(i+1, uid, f"{secs//60} min") for i,(uid,_,_,_,_,secs,_,_) in enumerate(modeB)]
-        e.add_field(name="🅱️ Top 5 Mode B", value="\n".join(lines), inline=True)
-
-    # Moyenne/session
-    if avg:
-        lines = [format_entry(i+1, uid, f"{(secs/sc)//60} min") for i,(uid,_,secs,_,_,_,_,sc) in enumerate(avg)]
-        e.add_field(name="📊 Top 5 moy/session", value="\n".join(lines), inline=False)
-
-    # Streaks
-    if streaks:
-        lines = [f"**#{i+1}** <@{uid}> — 🔥 {cur}j (best {best}j)" for i,(uid,cur,best) in enumerate(streaks)]
-        e.add_field(name="🔥 Top 5 streaks", value="\n".join(lines), inline=False)
-
-    await ctx.send(embed=e)
-
-# ─── ADMIN ─────────────────────────────────────────────────────────────────────
-@bot.command(name='help', help='Afficher l’aide')
-async def help_cmd(ctx):
-    e = discord.Embed(title=messages.HELP["title"], color=messages.HELP["color"])
-    for f in messages.HELP["fields"]:
-        e.add_field(name=f["name"], value=f["value"], inline=f["inline"])
-    await ctx.send(embed=e)
-
-@bot.command(name='maintenance', help='Activer/Désactiver maintenance')
-@is_admin()
-async def maintenance(ctx):
-    global MAINTENANCE_MODE
-    MAINTENANCE_MODE = not MAINTENANCE_MODE
-    state = "activée" if MAINTENANCE_MODE else "désactivée"
-    await ctx.send(messages.TEXT["maintenance_toggle"].format(state=state))
-
-# ─── LOOP POMODORO ─────────────────────────────────────────────────────────────
-@tasks.loop(minutes=1)
-async def pomodoro_loop():
-    now    = datetime.now(timezone.utc)
-    minute = now.minute
-    chan   = bot.get_channel(POMODORO_CHANNEL_ID)
-    if not chan:
-        return
-
-    # MODE A
-    if PARTICIPANTS_A:
-        mention = (await ensure_role(chan.guild, POMO_ROLE_A)).mention
-        if minute == 0:
-            for uid in PARTICIPANTS_A:
-                await ajouter_temps(uid, chan.guild.id, BREAK_TIME_A*60, mode='A_break')
-            await chan.send(f"🔔 Mode A : début travail ({WORK_TIME_A} min) {mention}")
-        elif minute == WORK_TIME_A:
-            for uid in PARTICIPANTS_A:
-                await ajouter_temps(uid, chan.guild.id, WORK_TIME_A*60, mode='A', is_session_end=True)
-            await chan.send(f"☕ Mode A : début pause ({BREAK_TIME_A} min) {mention}")
-
-    # MODE B
-    if PARTICIPANTS_B:
-        mention = (await ensure_role(chan.guild, POMO_ROLE_B)).mention
-        if minute == 0:
-            for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id, BREAK_TIME_B*60, mode='B_break')
-            await chan.send(f"🔔 Mode B : début travail (25 min) {mention}")
-        elif minute == WORK_TIME_B:
-            for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
-            await chan.send(f"☕ Mode B : pause 1 ({BREAK_TIME_B} min) {mention}")
-        elif minute == WORK_TIME_B + BREAK_TIME_B:
-            for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id, BREAK_TIME_B*60, mode='B_break')
-            await chan.send(f"🔔 Mode B : deuxième travail (25 min) {mention}")
-        elif minute == 2*WORK_TIME_B + BREAK_TIME_B:
-            for uid in PARTICIPANTS_B:
-                await ajouter_temps(uid, chan.guild.id, WORK_TIME_B*60, mode='B', is_session_end=True)
-            await chan.send(f"☕ Mode B : pause finale ({BREAK_TIME_B} min) {mention}")
-
-# ─── LANCEMENT ────────────────────────────────────────────────────────────────
-if __name__ == '__main__':
-    bot.run(TOKEN)
+    entries = []
+    for (uid, _, total, wA, bA, wB, bB, sc) in rows:
+        if cat == "overall":
+            score = total
+            label = f"{score/60:.1f} min"
+        elif cat == "a":
+            score = wA
+            label = f"{wA/60:.1f} / {bA/60:.1f} min"
+        elif cat == "b":
+            score = wB
+            label = f"{wB/60:.1f} / {bB/60:.1f} min"
+        elif cat == "pause":
+            score = bA + bB
+            label = f"{(bA+bB)/60:.1f} min"
+        elif cat == "sessions":
+            score = sc
+            label = f"{score} sessions"
+        elif cat == "avg":
+            score = (total/sc) if sc else 0
+            label = f"{int(score)//60} min {int(score)%60} s"
+        else:
+            streaks = await top_streaks(guild
