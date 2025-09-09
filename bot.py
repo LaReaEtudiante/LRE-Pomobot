@@ -18,6 +18,7 @@ from database import (
     init_db,
     ajouter_temps,
     get_all_stats,
+    classement_top10,
     add_participant,
     remove_participant,
     get_all_participants,
@@ -98,6 +99,7 @@ def check_setup():
 
 def check_channel():
     async def predicate(ctx):
+        # allow admin, help, status, update, me anywhere
         if ctx.author.guild_permissions.administrator or ctx.command.name in ('status','help','update','me'):
             return True
         if ctx.channel.id == POMODORO_CHANNEL_ID:
@@ -158,7 +160,7 @@ async def on_command_error(ctx, error):
     )
     await ctx.send(text)
 
-# ─── COMMANDES MEMBRES ─────────────────────────────────────────────────────────
+# ─── COMMANDES ÉTUDIANT ────────────────────────────────────────────────────────
 @bot.command(name='joinA', help='Rejoindre le mode A (50-10)')
 @check_maintenance()
 @check_setup()
@@ -225,7 +227,7 @@ async def me(ctx):
     user = ctx.author
     guild_id = ctx.guild.id
 
-    # session en cours
+    # 1) Lire la session en cours (sans la supprimer)
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT join_ts, mode FROM participants WHERE guild_id=? AND user_id=?",
@@ -241,7 +243,7 @@ async def me(ctx):
     else:
         status = "Pas en session actuellement"
 
-    # stats globales
+    # 2) Récup stats
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT total_seconds, work_seconds_A, break_seconds_A, work_seconds_B, break_seconds_B, session_count "
@@ -249,30 +251,32 @@ async def me(ctx):
             (guild_id, user.id)
         )
         row = await cur.fetchone()
-
     if row:
         total_s, wA, bA, wB, bB, scount = row
     else:
         total_s = wA = bA = wB = bB = scount = 0
 
-    # streaks
-    current_streak, best_streak = await get_streak(guild_id, user.id)
+    # 3) Streaks
+    cs, bs = await get_streak(guild_id, user.id)
 
-    # embed
-    embed = discord.Embed(title=f"📋 Stats de {user.name}", color=messages.MsgColors.AQUA.value)
+    # 4) Embed
+    embed = discord.Embed(
+        title=f"📋 Stats de {user.name}",
+        color=messages.MsgColors.AQUA.value
+    )
     embed.add_field(name="Session en cours", value=status, inline=False)
-    embed.add_field(name="Temps total", value=f"{total_s//60} min", inline=False)
-    embed.add_field(name="Mode A (travail/pause)", value=f"{wA//60} / {bA//60} min", inline=True)
-    embed.add_field(name="Mode B (travail/pause)", value=f"{wB//60} / {bB//60} min", inline=True)
+    embed.add_field(name="Temps total", value=f"{total_s//60} min {total_s%60} s", inline=False)
+    embed.add_field(name="Mode A travail / pause", value=f"{wA//60} / {bA//60} min", inline=True)
+    embed.add_field(name="Mode B travail / pause", value=f"{wB//60} / {bB//60} min", inline=True)
     embed.add_field(name="Nombre de sessions", value=str(scount), inline=True)
     avg = (total_s / scount) if scount else 0
     embed.add_field(name="Moyenne/session", value=f"{int(avg)//60} min {int(avg)%60} s", inline=True)
-    embed.add_field(name="🔥 Streak actuel", value=f"{current_streak} jours", inline=True)
-    embed.add_field(name="🏅 Meilleur streak", value=f"{best_streak} jours", inline=True)
+    embed.add_field(name="🔥 Streak actuel", value=f"{cs} jours", inline=True)
+    embed.add_field(name="🏅 Meilleur streak", value=f"{bs} jours", inline=True)
 
     await ctx.send(embed=embed)
 
-@bot.command(name='status', help="Afficher l'état global du bot")
+@bot.command(name='status', help='Afficher état global du bot')
 async def status(ctx):
     latency = round(bot.latency * 1000)
     now_utc = datetime.now(timezone.utc)
@@ -281,15 +285,12 @@ async def status(ctx):
     except ZoneInfoNotFoundError:
         local = now_utc.astimezone()
     local_str = local.strftime("%Y-%m-%d %H:%M:%S")
-
     phA, rA = get_phase_and_remaining(now_utc, 'A')
     phB, rB = get_phase_and_remaining(now_utc, 'B')
     mA, sA = divmod(rA, 60)
     mB, sB = divmod(rB, 60)
-
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
-
     chan = bot.get_channel(POMODORO_CHANNEL_ID)
     chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
     guild       = ctx.guild
@@ -297,7 +298,6 @@ async def status(ctx):
     roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
     roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
     roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
-
     proc = await asyncio.create_subprocess_shell(
         "git rev-parse --short HEAD",
         stdout=asyncio.subprocess.PIPE,
@@ -305,7 +305,6 @@ async def status(ctx):
     )
     out, _ = await proc.communicate()
     sha = out.decode().strip() if out else "unknown"
-
     try:
         with open("VERSION", encoding="utf-8") as f:
             file_ver = f.read().strip()
@@ -315,14 +314,13 @@ async def status(ctx):
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
     e.add_field(name="Latence", value=f"{latency} ms", inline=True)
     e.add_field(name="Heure (Lausanne)", value=local_str, inline=True)
-    e.add_field(name="Mode A", value=f"{countA} en **{phA}** ({mA}m{sA}s)", inline=False)
-    e.add_field(name="Mode B", value=f"{countB} en **{phB}** ({mB}m{sB}s)", inline=False)
-    e.add_field(name="Canal", value=chan_field, inline=False)
+    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {mA}m {sA}s", inline=False)
+    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {mB}m {sB}s", inline=False)
+    e.add_field(name="Canal Pomodoro", value=chan_field, inline=False)
     e.add_field(name="Rôle A", value=roleA_field, inline=False)
     e.add_field(name="Rôle B", value=roleB_field, inline=False)
     e.add_field(name="Version (SHA)", value=sha, inline=True)
-    e.add_field(name="Version fichier", value=file_ver, inline=True)
-
+    e.add_field(name="Version (fichier)", value=file_ver, inline=True)
     await ctx.send(embed=e)
 
 @bot.command(name='stats', help='Afficher stats du serveur')
@@ -335,65 +333,54 @@ async def stats(ctx):
     unique  = len(data)
     total_s = sum(r[2] for r in data)
     avg     = (total_s/unique) if unique else 0
-
     daily = await get_daily_totals(guild_id, days=7)
     daily_str = "\n".join(f"{day}: {secs//60} m" for day, secs in daily) or "aucune donnée"
-
     weekly = await get_weekly_sessions(guild_id, weeks=4)
     weekly_str = "\n".join(f"{yw}: {count}" for yw, count in weekly) or "aucune donnée"
-
     e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
     e.add_field(name="Utilisateurs uniques", value=str(unique), inline=False)
     e.add_field(name="Temps total (min)", value=f"{total_s/60:.1f}", inline=False)
     e.add_field(name="Moyenne/utilisateur (min)", value=f"{avg/60:.1f}", inline=False)
     e.add_field(name="📅 Totaux 7 jours", value=daily_str, inline=False)
     e.add_field(name="🗓 Sessions / semaine", value=weekly_str, inline=False)
-
     await ctx.send(embed=e)
 
-@bot.command(name='leaderboard', help='Classements (overall, A, B, pause, sessions, avg, streaks)')
+@bot.command(name='leaderboard', help='Classements divers')
 @check_maintenance()
 @check_setup()
 @check_channel()
-async def leaderboard(ctx, category: str = "overall"):
+async def leaderboard(ctx):
     guild_id = ctx.guild.id
-    cat = category.lower()
-
-    title_map = {
-        "overall":  "🏆 Top global",
-        "a":        "🥇 Top Mode A",
-        "b":        "🥈 Top Mode B",
-        "pause":    "☕ Top pauses",
-        "sessions": "🔄 Top sessions",
-        "avg":      "📊 Top moy/session",
-        "streaks":  "🔥 Top streaks"
-    }
-    if cat not in title_map:
-        noms = ", ".join(title_map.keys())
-        return await ctx.send(f"⚠️ Catégorie invalide. Choisissez parmi: {noms}")
-
-    e = discord.Embed(title=title_map[cat], color=messages.LEADERBOARD["color"])
     rows = await get_all_stats(guild_id)
-
-    entries = []
-    for (uid, _, total, wA, bA, wB, bB, sc) in rows:
-        if cat == "overall":
-            score = total
-            label = f"{score/60:.1f} min"
-        elif cat == "a":
-            score = wA
-            label = f"{wA/60:.1f} / {bA/60:.1f} min"
-        elif cat == "b":
-            score = wB
-            label = f"{wB/60:.1f} / {bB/60:.1f} min"
-        elif cat == "pause":
-            score = bA + bB
-            label = f"{(bA+bB)/60:.1f} min"
-        elif cat == "sessions":
-            score = sc
-            label = f"{score} sessions"
-        elif cat == "avg":
-            score = (total/sc) if sc else 0
-            label = f"{int(score)//60} min {int(score)%60} s"
+    entries_overall = [(uid, total) for (uid, _, total, *_ ) in rows]
+    entries_A = [(uid, wA) for (uid, _, _, wA, _, _, _, _) in rows]
+    entries_B = [(uid, wB) for (uid, _, _, _, _, wB, _, _) in rows]
+    entries_avg = [
+        (uid, (total/sc) if sc>=10 else 0)
+        for (uid, _, total, _, _, _, _, sc) in rows
+    ]
+    entries_sessions = [(uid, sc) for (uid, _, _, _, _, _, _, sc) in rows]
+    def top(entries, n=5):
+        return sorted(entries, key=lambda x:x[1], reverse=True)[:n]
+    e = discord.Embed(title="🏆 Leaderboard", color=messages.LEADERBOARD["color"])
+    for title, entries in [
+        ("🌍 Top 10 Global", top(entries_overall, 10)),
+        ("🥇 Top 5 Mode A", top(entries_A)),
+        ("🥈 Top 5 Mode B", top(entries_B)),
+        ("📊 Top 5 Moyenne/session (10+)", top(entries_avg)),
+        ("🔄 Top 5 Sessions", top(entries_sessions)),
+    ]:
+        if not entries or all(val==0 for _,val in entries):
+            value="aucune donnée"
         else:
-            streaks = await top_streaks(guild
+            lines=[]
+            for i,(uid,val) in enumerate(entries,start=1):
+                user=await bot.fetch_user(uid)
+                if isinstance(val,float):
+                    m,s=divmod(int(val),60)
+                    label=f"{m}m{s}s"
+                else:
+                    label=str(val)
+                lines.append(f"{i}. {user.name} — {label}")
+            value="\n".join(lines)
+        e.add_field(name=title, value=value, inline=False
