@@ -40,3 +40,6 @@ args = "python3 bot.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[agent]
+expertMode = true
