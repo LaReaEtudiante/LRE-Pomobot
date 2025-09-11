@@ -205,7 +205,47 @@ async def on_command_error(ctx, error):
     )
     await ctx.send(text)
 
-# ─── COMMANDES ÉTUDIANT ────────────────────────────────────────────────────────
+# ─── COMMANDES MEMBRE ────────────────────────────────────────────────────────
+# ─── Help 
+@bot.command(name="help", help="Afficher la liste des commandes")
+async def help_command(ctx):
+    e = discord.Embed(
+        title="📖 Aide - Commandes disponibles",
+        color=discord.Color.blue()
+    )
+
+    # Commandes pour les étudiants
+    e.add_field(
+        name="👤 Étudiants",
+        value=(
+            f"{PREFIX}joinA — rejoindre le mode A (50/10)\n"
+            f"{PREFIX}joinB — rejoindre le mode B (25/5/25/5)\n"
+            f"{PREFIX}leave — quitter la session en cours\n"
+            f"{PREFIX}me — voir vos stats détaillées\n"
+            f"{PREFIX}stats — statistiques du serveur\n"
+            f"{PREFIX}leaderboard — classements divers"
+            f"{PREFIX}status — voir l’état global du bot\n"
+        ),
+        inline=False
+    )
+
+    # Commandes admin
+    e.add_field(
+        name="🛠️ Administrateurs",
+        value=(
+            f"{PREFIX}maintenance — dés/activer le mode maintenance\n"
+            f"{PREFIX}defs — définir le salon Pomodoro\n"
+            f"{PREFIX}defa — définir ou créer le rôle A\n"
+            f"{PREFIX}defb — définir ou créer le rôle B\n"
+            f"{PREFIX}clear_stats — réinitialiser toutes les stats\n"
+            f"{PREFIX}update — mise à jour & redémarrage du bot"
+        ),
+        inline=False
+    )
+
+    await ctx.send(embed=e)
+
+# ─── Join A
 @bot.command(name='joinA', help='Rejoindre le mode A (50-10)')
 @check_maintenance()
 @check_setup()
@@ -221,6 +261,7 @@ async def joinA(ctx):
     m, s = divmod(rem, 60)
     await ctx.send(f"✅ {user.mention} a rejoint A → **{ph}**, reste {m} min {s} s")
 
+ # ─── Join B
 @bot.command(name='joinB', help='Rejoindre le mode B (25-5-25-5)')
 @check_maintenance()
 @check_setup()
@@ -236,6 +277,7 @@ async def joinB(ctx):
     m, s = divmod(rem, 60)
     await ctx.send(f"✅ {user.mention} a rejoint B → **{ph}**, reste {m} min {s} s")
 
+# ─── Leave 
 @bot.command(name='leave', help='Quitter la session Pomodoro')
 @check_maintenance()
 @check_setup()
@@ -258,6 +300,7 @@ async def leave(ctx):
     m, s = divmod(elapsed, 60)
     await ctx.send(f"👋 {user.mention} a quitté. +{m} min {s} s ajoutées.")
 
+# ─── Me
 @bot.command(name='me', help='Afficher vos stats personnelles')
 @check_maintenance()
 @check_setup()
@@ -310,53 +353,8 @@ async def me(ctx):
     embed.add_field(name="🏅 Meilleur streak", value=f"{bs} jours", inline=True)
     await ctx.send(embed=embed)
 
-@bot.command(name='status', help='Afficher état global du bot')
-async def status(ctx):
-    latency = round(bot.latency * 1000)
-    now_utc = datetime.now(timezone.utc)
-    try:
-        local = now_utc.astimezone(ZoneInfo('Europe/Zurich'))
-    except ZoneInfoNotFoundError:
-        local = now_utc.astimezone()
-    local_str = local.strftime("%Y-%m-%d %H:%M:%S")
-    phA, rA = get_phase_and_remaining(now_utc, 'A')
-    phB, rB = get_phase_and_remaining(now_utc, 'B')
-    mA, sA = divmod(rA, 60)
-    mB, sB = divmod(rB, 60)
-    countA = len(PARTICIPANTS_A)
-    countB = len(PARTICIPANTS_B)
-    chan = bot.get_channel(POMODORO_CHANNEL_ID)
-    chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
-    guild       = ctx.guild
-    roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
-    roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
-    roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
-    roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
-    proc = await asyncio.create_subprocess_shell(
-        "git rev-parse --short HEAD",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL
-    )
-    out, _ = await proc.communicate()
-    sha = out.decode().strip() if out else "unknown"
-    try:
-        with open("VERSION", encoding="utf-8") as f:
-            file_ver = f.read().strip()
-    except FileNotFoundError:
-        file_ver = "unknown"
-    e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
-    e.add_field(name="Latence", value=f"{latency} ms", inline=True)
-    e.add_field(name="Heure (Lausanne)", value=local_str, inline=True)
-    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {mA}m{sA}s", inline=False)
-    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {mB}m{sB}s", inline=False)
-    e.add_field(name="Canal Pomodoro", value=chan_field, inline=False)
-    e.add_field(name="Rôle A", value=roleA_field, inline=False)
-    e.add_field(name="Rôle B", value=roleB_field, inline=False)
-    e.add_field(name="Version (SHA)", value=sha, inline=True)
-    e.add_field(name="Version (fichier)", value=file_ver, inline=True)
-    await ctx.send(embed=e)
-
-@bot.command(name='stats', help='Afficher stats du serveur')
+# ─── Stats
+@bot.command(name='stats', help='Afficher les stats du serveur')
 @check_maintenance()
 @check_setup()
 @check_channel()
@@ -378,6 +376,7 @@ async def stats(ctx):
     e.add_field(name="🗓 Sessions / semaine", value=weekly_str, inline=False)
     await ctx.send(embed=e)
 
+# ─── Leaderboard
 @bot.command(name='leaderboard', help='Classements divers')
 @check_maintenance()
 @check_setup()
@@ -434,10 +433,199 @@ async def leaderboard(ctx):
         e.add_field(name="🔥 Top 5 Streaks", value="\n".join(lines), inline=False)
 
     await ctx.send(embed=e)
+
+# ─── Status
+@bot.command(name='status', help='Afficher état global du bot')
+async def status(ctx):
+    latency = round(bot.latency * 1000)
+    now_utc = datetime.now(timezone.utc)
+    try:
+        local = now_utc.astimezone(ZoneInfo('Europe/Zurich'))
+    except ZoneInfoNotFoundError:
+        local = now_utc.astimezone()
+    local_str = local.strftime("%Y-%m-%d %H:%M:%S")
+    phA, rA = get_phase_and_remaining(now_utc, 'A')
+    phB, rB = get_phase_and_remaining(now_utc, 'B')
+    mA, sA = divmod(rA, 60)
+    mB, sB = divmod(rB, 60)
+    countA = len(PARTICIPANTS_A)
+    countB = len(PARTICIPANTS_B)
+    chan = bot.get_channel(POMODORO_CHANNEL_ID)
+    chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
+    guild       = ctx.guild
+    roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
+    roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
+    roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
+    roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
+    proc = await asyncio.create_subprocess_shell(
+        "git rev-parse --short HEAD",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL
+    )
+    out, _ = await proc.communicate()
+    sha = out.decode().strip() if out else "unknown"
+    try:
+        with open("VERSION", encoding="utf-8") as f:
+            file_ver = f.read().strip()
+    except FileNotFoundError:
+        file_ver = "unknown"
+    e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
+    e.add_field(name="Latence", value=f"{latency} ms", inline=True)
+    e.add_field(name="Heure (Lausanne)", value=local_str, inline=True)
+    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {mA}m{sA}s", inline=False)
+    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {mB}m{sB}s", inline=False)
+    e.add_field(name="Canal Pomodoro", value=chan_field, inline=False)
+    e.add_field(name="Rôle A", value=roleA_field, inline=False)
+    e.add_field(name="Rôle B", value=roleB_field, inline=False)
+    e.add_field(name="Version (SHA)", value=sha, inline=True)
+    e.add_field(name="Version (fichier)", value=file_ver, inline=True)
+    await ctx.send(embed=e)
+
+# ─── COMMANDES ADMIN ──────────────────────────────────────────────────────────
+# ─── Maintenance 
+@bot.command(name="maintenance", help="Activer/désactiver le mode maintenance")
+@is_admin()
+async def maintenance(ctx):
+    global MAINTENANCE_MODE
+    MAINTENANCE_MODE = not MAINTENANCE_MODE
+    state = "✅ activé" if MAINTENANCE_MODE else "❌ désactivé"
+
+    e = discord.Embed(
+        title="🛠️ Mode Maintenance",
+        description=f"Le mode maintenance est maintenant **{state}**.",
+        color=discord.Color.orange()
+    )
+    await ctx.send(embed=e)
+
+# ─── Set Channel 
+@bot.command(name="defs", help="Définir le salon Pomodoro")
+@is_admin()
+async def defs(ctx, channel: discord.TextChannel = None):
+    global POMODORO_CHANNEL_ID
+    channel = channel or ctx.channel  # par défaut : le salon actuel
+    POMODORO_CHANNEL_ID = channel.id
+
+    # Mettre à jour le fichier settings.ini
+    config.set("CURRENT_SETTINGS", "channel_id", str(channel.id))
+    with open("settings.ini", "w", encoding="utf-8") as f:
+        config.write(f)
+
+    e = discord.Embed(
+        title="⚙️ Configuration mise à jour",
+        description=f"Le salon Pomodoro est maintenant défini sur {channel.mention}.",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=e)
+
+# ─── Set Role A 
+@bot.command(name="defa", help="Définir ou créer le rôle Pomodoro A")
+@is_admin()
+async def defa(ctx, *, role_name: str = None):
+    global POMO_ROLE_A
+    guild = ctx.guild
+
+    if role_name:
+        role = discord.utils.get(guild.roles, name=role_name)
+        if role is None:
+            role = await guild.create_role(name=role_name, colour=discord.Colour(0x206694))
+    else:
+        role = discord.utils.get(guild.roles, name=POMO_ROLE_A)
+        if role is None:
+            role = await guild.create_role(name=POMO_ROLE_A, colour=discord.Colour(0x206694))
+
+    POMO_ROLE_A = role.name
+
+    # Mise à jour du settings.ini
+    config.set("CURRENT_SETTINGS", "pomodoro_role_A", POMO_ROLE_A)
+    with open("settings.ini", "w", encoding="utf-8") as f:
+        config.write(f)
+
+    e = discord.Embed(
+        title="⚙️ Configuration mise à jour",
+        description=f"Le rôle Pomodoro A est maintenant défini sur {role.mention}.",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=e)
+
+
+# ─── Set Role B 
+@bot.command(name="defb", help="Définir ou créer le rôle Pomodoro B")
+@is_admin()
+async def defb(ctx, *, role_name: str = None):
+    global POMO_ROLE_B
+    guild = ctx.guild
+
+    if role_name:
+        role = discord.utils.get(guild.roles, name=role_name)
+        if role is None:
+            role = await guild.create_role(name=role_name, colour=discord.Colour(0x206694))
+    else:
+        role = discord.utils.get(guild.roles, name=POMO_ROLE_B)
+        if role is None:
+            role = await guild.create_role(name=POMO_ROLE_B, colour=discord.Colour(0x206694))
+
+    POMO_ROLE_B = role.name
+
+    # Mise à jour du settings.ini
+    config.set("CURRENT_SETTINGS", "pomodoro_role_B", POMO_ROLE_B)
+    with open("settings.ini", "w", encoding="utf-8") as f:
+        config.write(f)
+
+    e = discord.Embed(
+        title="⚙️ Configuration mise à jour",
+        description=f"Le rôle Pomodoro B est maintenant défini sur {role.mention}.",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=e)
+
+# ─── Clear Stats 
+@bot.command(name="clear_stats", help="Réinitialiser toutes les statistiques")
+@is_admin()
+async def clear_stats(ctx):
+    guild_id = ctx.guild.id
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Reset des stats
+        await db.execute("DELETE FROM stats WHERE guild_id=?", (guild_id,))
+        await db.execute("DELETE FROM session_logs WHERE guild_id=?", (guild_id,))
+        await db.execute("DELETE FROM streaks WHERE guild_id=?", (guild_id,))
+        await db.commit()
+
+    e = discord.Embed(
+        title="🗑 Réinitialisation effectuée",
+        description="Toutes les statistiques, y compris les 7 derniers jours et les streaks, ont été remises à zéro.",
+        color=discord.Color.red()
+    )
+    await ctx.send(embed=e)
+
+# ─── Update 
+@bot.command(name="update", help="Mettre à jour le bot depuis GitHub")
+@is_admin()
+async def update(ctx):
+    e = discord.Embed(
+        title="⚙️ Mise à jour en cours",
+        description="Le bot va être mis à jour et redémarré... Merci de patienter ⏳",
+        color=discord.Color.orange()
+    )
+    await ctx.send(embed=e)
+
+    # Exécuter le script de déploiement
+    proc = await asyncio.create_subprocess_shell(
+        "deploy-lre",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    out, err = await proc.communicate()
+
+    if proc.returncode == 0:
+        await ctx.send("✅ Mise à jour réussie ! Le bot redémarre...")
+        # Redémarrage du bot
+        os.execv(sys.executable, ['python'] + sys.argv)
+    else:
+        await ctx.send(f"❌ Erreur lors de la mise à jour:\n```\n{err.decode()}\n```")
+
 # Lancement du bot -----------------------------------------------------------------------------------------
 if __name__ == '__main__':
     if TOKEN is None:
         print("❌ DISCORD_TOKEN environment variable is missing!")
         exit(1)
     bot.run(TOKEN)
-
