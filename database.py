@@ -294,33 +294,6 @@ async def top_streaks(guild_id: int, limit: int = 5):
         """, (guild_id, limit))
         return await cur.fetchall()
 
-# ─── PARAMÈTRES GLOBAUX ─────────────────────────────────────────────────────────
-async def init_settings():
-    """Créer la table settings si elle n'existe pas."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                guild_id INTEGER PRIMARY KEY,
-                maintenance_enabled INTEGER DEFAULT 0
-            )
-        """)
-        await db.commit()
-
-async def get_maintenance(guild_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT maintenance_enabled FROM settings WHERE guild_id=?", (guild_id,))
-        row = await cur.fetchone()
-        return bool(row[0]) if row else False
-
-async def set_maintenance(guild_id: int, enabled: bool):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO settings(guild_id, maintenance_enabled)
-            VALUES(?, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET maintenance_enabled=excluded.maintenance_enabled
-        """, (guild_id, int(enabled)))
-        await db.commit()
-
 # ─── SETTINGS ────────────────────────────────────────────────────────────────
 async def get_setting(guild_id: int, key: str, default=None):
     """Lire une valeur dans settings"""
