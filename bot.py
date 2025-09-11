@@ -26,6 +26,8 @@ from database import (
     get_weekly_sessions,
     get_streak,
     top_streaks,
+    get_maintenance,
+    set_maintenance,
 )
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -175,11 +177,17 @@ async def pomodoro_loop():
 # ─── ÉVÉNEMENTS ────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
+    global MAINTENANCE_MODE
     logger.info(f"{bot.user} connecté.")
     await init_db()
+
+    # Charger état maintenance depuis DB
     for guild in bot.guilds:
+        MAINTENANCE_MODE = await get_maintenance(guild.id)
+
         for uid, mode in await get_all_participants(guild.id):
-            (PARTICIPANTS_A if mode=='A' else PARTICIPANTS_B).add(uid)
+            (PARTICIPANTS_A if mode == 'A' else PARTICIPANTS_B).add(uid)
+
     if not pomodoro_loop.is_running():
         pomodoro_loop.start()
 
@@ -223,7 +231,7 @@ async def help_command(ctx):
             f"{PREFIX}leave — quitter la session en cours\n"
             f"{PREFIX}me — voir vos stats détaillées\n"
             f"{PREFIX}stats — statistiques du serveur\n"
-            f"{PREFIX}leaderboard — classements divers"
+            f"{PREFIX}leaderboard — classements divers\n"
             f"{PREFIX}status — voir l’état global du bot\n"
         ),
         inline=False
@@ -238,7 +246,7 @@ async def help_command(ctx):
             f"{PREFIX}defa — définir ou créer le rôle A\n"
             f"{PREFIX}defb — définir ou créer le rôle B\n"
             f"{PREFIX}clear_stats — réinitialiser toutes les stats\n"
-            f"{PREFIX}update — mise à jour & redémarrage du bot"
+            f"{PREFIX}update — mise à jour & redémarrage du bot\n"
         ),
         inline=False
     )
@@ -402,11 +410,11 @@ async def leaderboard(ctx):
 
     # Classements principaux
     for title, entries in [
-        ("🌍 Top 10 Global", top(entries_overall, 10)),
-        ("🥇 Top 5 Mode A", top(entries_A)),
-        ("🥈 Top 5 Mode B", top(entries_B)),
-        ("📊 Top 5 Moyenne/session (10+)", top(entries_avg)),
-        ("🔄 Top 5 Sessions", top(entries_sessions)),
+        ("🌍 Top 10 - Global", top(entries_overall, 10)),
+        ("🥇 Top 5 - Mode A", top(entries_A)),
+        ("🥈 Top 5 - Mode B", top(entries_B)),
+        ("📊 Top 5 - Moyenne/session (10+)", top(entries_avg)),
+        ("🔄 Top 5 - Sessions", top(entries_sessions)),
     ]:
         if not entries or all(val == 0 for _, val in entries):
             value = "aucune donnée"
@@ -487,15 +495,43 @@ async def status(ctx):
 @is_admin()
 async def maintenance(ctx):
     global MAINTENANCE_MODE
-    MAINTENANCE_MODE = not MAINTENANCE_MODE
-    state = "✅ activé" if MAINTENANCE_MODE else "❌ désactivé"
+    guild_id = ctx.guild.id
+    now_ts = datetime.now(timezone.utc).timestamp()
 
-    e = discord.Embed(
-        title="🛠️ Mode Maintenance",
-        description=f"Le mode maintenance est maintenant **{state}**.",
-        color=discord.Color.orange()
-    )
-    await ctx.send(embed=e)
+    if not MAINTENANCE_MODE:
+        # Activation maintenance → vider les participants
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT user_id, join_ts, mode FROM participants WHERE guild_id=?",
+                (guild_id,)
+            )
+            rows = await cur.fetchall()
+
+        for user_id, join_ts, mode in rows:
+            elapsed = int(now_ts - join_ts)
+            await ajouter_temps(user_id, guild_id, elapsed, mode=mode, is_session_end=True)
+            if mode == "A":
+                PARTICIPANTS_A.discard(user_id)
+            else:
+                PARTICIPANTS_B.discard(user_id)
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM participants WHERE guild_id=?", (guild_id,))
+            await db.commit()
+
+        MAINTENANCE_MODE = True
+        await set_maintenance(guild_id, True)
+        await ctx.send("🚧 Mode maintenance activé. Tous les participants ont été éjectés proprement.")
+    else:
+        # Désactivation maintenance
+        MAINTENANCE_MODE = False
+        await set_maintenance(guild_id, False)
+        await ctx.send("✅ Mode maintenance désactivé, le bot est à nouveau opérationnel.")
+
+        # Envoyer un message dans le canal Pomodoro si configuré
+        chan = bot.get_channel(POMODORO_CHANNEL_ID)
+        if chan:
+            await chan.send("✅ La maintenance est terminée, vous pouvez réutiliser le bot !")
 
 # ─── Set Channel 
 @bot.command(name="defs", help="Définir le salon Pomodoro")
@@ -598,30 +634,40 @@ async def clear_stats(ctx):
     await ctx.send(embed=e)
 
 # ─── Update 
-@bot.command(name="update", help="Mettre à jour le bot depuis GitHub")
+@bot.command(name="update", help="Mettre à jour et redémarrer le bot")
 @is_admin()
 async def update(ctx):
-    e = discord.Embed(
-        title="⚙️ Mise à jour en cours",
-        description="Le bot va être mis à jour et redémarré... Merci de patienter ⏳",
-        color=discord.Color.orange()
-    )
-    await ctx.send(embed=e)
+    guild_id = ctx.guild.id
+    now_ts = datetime.now(timezone.utc).timestamp()
 
-    # Exécuter le script de déploiement
-    proc = await asyncio.create_subprocess_shell(
-        "deploy-lre",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    out, err = await proc.communicate()
+    # Sauvegarder les temps des participants actifs
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT user_id, join_ts, mode FROM participants WHERE guild_id=?",
+            (guild_id,)
+        )
+        rows = await cur.fetchall()
 
-    if proc.returncode == 0:
-        await ctx.send("✅ Mise à jour réussie ! Le bot redémarre...")
-        # Redémarrage du bot
-        os.execv(sys.executable, ['python'] + sys.argv)
-    else:
-        await ctx.send(f"❌ Erreur lors de la mise à jour:\n```\n{err.decode()}\n```")
+    for user_id, join_ts, mode in rows:
+        elapsed = int(now_ts - join_ts)
+        await ajouter_temps(user_id, guild_id, elapsed, mode=mode, is_session_end=True)
+        # Nettoyer la mémoire
+        if mode == "A":
+            PARTICIPANTS_A.discard(user_id)
+        else:
+            PARTICIPANTS_B.discard(user_id)
+
+    # Supprimer tous les participants
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM participants WHERE guild_id=?", (guild_id,))
+        await db.commit()
+
+    # Confirmation côté Discord
+    await ctx.send("♻️ Mise à jour lancée, le bot va redémarrer...")
+
+    # Déploiement et redémarrage
+    os.system("git pull origin main && pip install -r requirements.txt && sudo systemctl restart lre-bot")
+    sys.exit(0)
 
 # Lancement du bot -----------------------------------------------------------------------------------------
 if __name__ == '__main__':
