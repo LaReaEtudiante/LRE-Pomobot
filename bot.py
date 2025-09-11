@@ -26,8 +26,8 @@ from database import (
     get_weekly_sessions,
     get_streak,
     top_streaks,
-    get_maintenance,
-    set_maintenance,
+    get_setting,
+    set_setting,
 )
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -131,6 +131,18 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str,int]:
         return 'pause', (60-m)*60 - sec
     return 'travail', 0
 
+def format_duration(seconds: int) -> str:
+    """Formater une durée en jours, heures, minutes, secondes."""
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    parts = []
+    if days: parts.append(f"{days}j")
+    if hours: parts.append(f"{hours}h")
+    if minutes: parts.append(f"{minutes}m")
+    if sec: parts.append(f"{sec}s")
+    return " ".join(parts) if parts else "0s"
+
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
 @tasks.loop(minutes=1)
 async def pomodoro_loop():
@@ -177,14 +189,17 @@ async def pomodoro_loop():
 # ─── ÉVÉNEMENTS ────────────────────────────────────────────────────────────────
 @bot.event
 async def on_ready():
-    global MAINTENANCE_MODE
     logger.info(f"{bot.user} connecté.")
     await init_db()
 
-    # Charger état maintenance depuis DB
-    for guild in bot.guilds:
-        MAINTENANCE_MODE = await get_maintenance(guild.id)
+    # Message dans le salon Pomodoro après redémarrage
+    if POMODORO_CHANNEL_ID:
+        channel = bot.get_channel(POMODORO_CHANNEL_ID)
+        if channel:
+            await channel.send("✅ Tcheu mais ct'équipte ça joue ou bien?! Je suis de retour après mise à jour 🚀")
 
+    # Charger participants en mémoire
+    for guild in bot.guilds:
         for uid, mode in await get_all_participants(guild.id):
             (PARTICIPANTS_A if mode == 'A' else PARTICIPANTS_B).add(uid)
 
@@ -490,48 +505,43 @@ async def status(ctx):
     await ctx.send(embed=e)
 
 # ─── COMMANDES ADMIN ──────────────────────────────────────────────────────────
-# ─── Maintenance 
 @bot.command(name="maintenance", help="Activer/désactiver le mode maintenance")
 @is_admin()
 async def maintenance(ctx):
-    global MAINTENANCE_MODE
     guild_id = ctx.guild.id
-    now_ts = datetime.now(timezone.utc).timestamp()
 
-    if not MAINTENANCE_MODE:
-        # Activation maintenance → vider les participants
-        async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute(
-                "SELECT user_id, join_ts, mode FROM participants WHERE guild_id=?",
-                (guild_id,)
-            )
-            rows = await cur.fetchall()
+    # Lire l’état actuel
+    enabled = await get_setting(guild_id, "maintenance_enabled", "0")
+    enabled = bool(int(enabled))
 
-        for user_id, join_ts, mode in rows:
-            elapsed = int(now_ts - join_ts)
-            await ajouter_temps(user_id, guild_id, elapsed, mode=mode, is_session_end=True)
-            if mode == "A":
-                PARTICIPANTS_A.discard(user_id)
-            else:
-                PARTICIPANTS_B.discard(user_id)
+    # Inverser l’état
+    new_state = not enabled
+    await set_setting(guild_id, "maintenance_enabled", "1" if new_state else "0")
 
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("DELETE FROM participants WHERE guild_id=?", (guild_id,))
-            await db.commit()
+    if new_state:
+        await ctx.send("🔧 Mode maintenance **activé**. Toutes les sessions vont être arrêtées.")
 
-        MAINTENANCE_MODE = True
-        await set_maintenance(guild_id, True)
-        await ctx.send("🚧 Mode maintenance activé. Tous les participants ont été éjectés proprement.")
+        # Éjecter les participants et log leur temps
+        for uid, mode in await get_all_participants(guild_id):
+            join_ts, mode = await remove_participant(uid, guild_id)
+            if join_ts:
+                elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
+                await ajouter_temps(uid, guild_id, elapsed, mode=mode, is_session_end=True)
+
+            # Retirer le rôle associé
+            member = ctx.guild.get_member(uid)
+            if member:
+                role_name = POMO_ROLE_A if mode == "A" else POMO_ROLE_B
+                role = discord.utils.get(ctx.guild.roles, name=role_name)
+                if role:
+                    await member.remove_roles(role)
+
     else:
-        # Désactivation maintenance
-        MAINTENANCE_MODE = False
-        await set_maintenance(guild_id, False)
-        await ctx.send("✅ Mode maintenance désactivé, le bot est à nouveau opérationnel.")
-
-        # Envoyer un message dans le canal Pomodoro si configuré
+        await ctx.send("✅ Mode maintenance **désactivé**. Le bot est disponible.")
+        # Prévenir dans le salon Pomodoro
         chan = bot.get_channel(POMODORO_CHANNEL_ID)
         if chan:
-            await chan.send("✅ La maintenance est terminée, vous pouvez réutiliser le bot !")
+            await chan.send("✅ La maintenance est terminée, vous pouvez de nouveau utiliser le bot.")
 
 # ─── Set Channel 
 @bot.command(name="defs", help="Définir le salon Pomodoro")
@@ -634,13 +644,14 @@ async def clear_stats(ctx):
     await ctx.send(embed=e)
 
 # ─── Update 
+# ─── Update
 @bot.command(name="update", help="Mettre à jour et redémarrer le bot")
 @is_admin()
 async def update(ctx):
     guild_id = ctx.guild.id
     now_ts = datetime.now(timezone.utc).timestamp()
 
-    # Sauvegarder les temps des participants actifs
+    # Sauvegarder les temps + retirer rôles
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT user_id, join_ts, mode FROM participants WHERE guild_id=?",
@@ -651,13 +662,23 @@ async def update(ctx):
     for user_id, join_ts, mode in rows:
         elapsed = int(now_ts - join_ts)
         await ajouter_temps(user_id, guild_id, elapsed, mode=mode, is_session_end=True)
-        # Nettoyer la mémoire
+
+        # Retirer des sets en mémoire
         if mode == "A":
             PARTICIPANTS_A.discard(user_id)
+            role_name = POMO_ROLE_A
         else:
             PARTICIPANTS_B.discard(user_id)
+            role_name = POMO_ROLE_B
 
-    # Supprimer tous les participants
+        # Retirer le rôle discord
+        member = ctx.guild.get_member(user_id)
+        if member:
+            role = discord.utils.get(ctx.guild.roles, name=role_name)
+            if role:
+                await member.remove_roles(role)
+
+    # Supprimer tous les participants en DB
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM participants WHERE guild_id=?", (guild_id,))
         await db.commit()
@@ -665,8 +686,8 @@ async def update(ctx):
     # Confirmation côté Discord
     await ctx.send("♻️ Mise à jour lancée, le bot va redémarrer...")
 
-    # Déploiement et redémarrage
-    os.system("git pull origin main && pip install -r requirements.txt && sudo systemctl restart lre-bot")
+    # Lancer ton script système (déploiement + restart via systemd)
+    os.system("deploy-lre")
     sys.exit(0)
 
 # Lancement du bot -----------------------------------------------------------------------------------------
