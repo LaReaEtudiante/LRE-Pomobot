@@ -74,13 +74,16 @@ async def init_db():
         )
         """)
 
-        # Table settings (configuration serveur : maintenance, etc.)
+        # Table settings (configuration flexible par serveur)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS settings (
-            guild_id INTEGER PRIMARY KEY,
-            maintenance_enabled INTEGER DEFAULT 0
+            guild_id INTEGER,
+            key TEXT,
+            value TEXT,
+            PRIMARY KEY (guild_id, key)
         )
         """)
+
 
         await db.commit()
 
@@ -316,4 +319,26 @@ async def set_maintenance(guild_id: int, enabled: bool):
             VALUES(?, ?)
             ON CONFLICT(guild_id) DO UPDATE SET maintenance_enabled=excluded.maintenance_enabled
         """, (guild_id, int(enabled)))
+        await db.commit()
+
+# ─── SETTINGS ────────────────────────────────────────────────────────────────
+async def get_setting(guild_id: int, key: str, default=None):
+    """Lire une valeur dans settings"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT value FROM settings WHERE guild_id=? AND key=?",
+            (guild_id, key),
+        )
+        row = await cur.fetchone()
+        return row[0] if row else default
+
+
+async def set_setting(guild_id: int, key: str, value: str):
+    """Écrire ou mettre à jour une valeur dans settings"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO settings (guild_id, key, value)
+            VALUES (?, ?, ?)
+            ON CONFLICT(guild_id, key) DO UPDATE SET value=excluded.value
+        """, (guild_id, key, str(value)))
         await db.commit()
