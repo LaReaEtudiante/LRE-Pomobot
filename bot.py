@@ -28,6 +28,7 @@ from database import (
     top_streaks,
     get_setting,
     set_setting,
+    timedelta,
 )
 
 # ─── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -132,15 +133,22 @@ def get_phase_and_remaining(now: datetime, mode: str) -> tuple[str,int]:
     return 'travail', 0
 
 def format_duration(seconds: int) -> str:
-    """Formater une durée en jours, heures, minutes, secondes."""
-    minutes, sec = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
+    """Retourne un temps formaté (ex: '1h14m35s', '2j 3h 5m')."""
+    td = timedelta(seconds=seconds)
+    days = td.days
+    hours, remainder = divmod(td.seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
     parts = []
-    if days: parts.append(f"{days}j")
-    if hours: parts.append(f"{hours}h")
-    if minutes: parts.append(f"{minutes}m")
-    if sec: parts.append(f"{sec}s")
+    if days > 0:
+        parts.append(f"{days}j")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if seconds > 0:
+        parts.append(f"{seconds}s")
+
     return " ".join(parts) if parts else "0s"
 
 # ─── BOUCLE POMODORO ──────────────────────────────────────────────────────────
@@ -148,10 +156,15 @@ def format_duration(seconds: int) -> str:
 async def pomodoro_loop():
     if POMODORO_CHANNEL_ID is None:
         return
+
     now    = datetime.now(timezone.utc)
     minute = now.minute
     chan   = bot.get_channel(POMODORO_CHANNEL_ID)
     if not chan:
+        return
+
+    # 🔒 Stopper si maintenance activée
+    if await get_maintenance(chan.guild.id):
         return
 
     # Mode A
@@ -191,20 +204,20 @@ async def pomodoro_loop():
 async def on_ready():
     logger.info(f"{bot.user} connecté.")
     await init_db()
-
-    # Message dans le salon Pomodoro après redémarrage
-    if POMODORO_CHANNEL_ID:
-        channel = bot.get_channel(POMODORO_CHANNEL_ID)
-        if channel:
-            await channel.send("✅ Tcheu mais ct'équipte ça joue ou bien?! Je suis de retour après mise à jour 🚀")
-
-    # Charger participants en mémoire
+    # Ne pas recharger PARTICIPANTS depuis la DB
+    PARTICIPANTS_A.clear()
+    PARTICIPANTS_B.clear()
+    # Optionnel : enlever tous les rôles A/B du serveur au boot
     for guild in bot.guilds:
-        for uid, mode in await get_all_participants(guild.id):
-            (PARTICIPANTS_A if mode == 'A' else PARTICIPANTS_B).add(uid)
-
-    if not pomodoro_loop.is_running():
-        pomodoro_loop.start()
+        roleA = discord.utils.get(guild.roles, name=POMO_ROLE_A)
+        roleB = discord.utils.get(guild.roles, name=POMO_ROLE_B)
+        if roleA:
+            for member in roleA.members:
+                await member.remove_roles(roleA)
+        if roleB:
+            for member in roleB.members:
+                await member.remove_roles(roleB)
+    logger.info("Tous les participants réinitialisés après redémarrage.")
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -277,12 +290,13 @@ async def joinA(ctx):
     user = ctx.author
     if user.id in PARTICIPANTS_A | PARTICIPANTS_B:
         return await ctx.send(f"🚫 {user.mention}, déjà inscrit.")
+    
     PARTICIPANTS_A.add(user.id)
     await add_participant(user.id, ctx.guild.id, 'A')
     await user.add_roles(await ensure_role(ctx.guild, POMO_ROLE_A))
+    
     ph, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'A')
-    m, s = divmod(rem, 60)
-    await ctx.send(f"✅ {user.mention} a rejoint A → **{ph}**, reste {m} min {s} s")
+    await ctx.send(f"✅ {user.mention} a rejoint A → **{ph}**, reste {format_duration(rem)}")
 
  # ─── Join B
 @bot.command(name='joinB', help='Rejoindre le mode B (25-5-25-5)')
@@ -293,12 +307,13 @@ async def joinB(ctx):
     user = ctx.author
     if user.id in PARTICIPANTS_A | PARTICIPANTS_B:
         return await ctx.send(f"🚫 {user.mention}, déjà inscrit.")
+    
     PARTICIPANTS_B.add(user.id)
     await add_participant(user.id, ctx.guild.id, 'B')
     await user.add_roles(await ensure_role(ctx.guild, POMO_ROLE_B))
+    
     ph, rem = get_phase_and_remaining(datetime.now(timezone.utc), 'B')
-    m, s = divmod(rem, 60)
-    await ctx.send(f"✅ {user.mention} a rejoint B → **{ph}**, reste {m} min {s} s")
+    await ctx.send(f"✅ {user.mention} a rejoint B → **{ph}**, reste {format_duration(rem)}")
 
 # ─── Leave 
 @bot.command(name='leave', help='Quitter la session Pomodoro')
@@ -310,18 +325,25 @@ async def leave(ctx):
     join_ts, mode = await remove_participant(user.id, ctx.guild.id)
     if join_ts is None:
         return await ctx.send(f"🚫 {user.mention}, pas inscrit.")
+
     elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
+
+    # Nettoyage en mémoire
     if mode == 'A':
         PARTICIPANTS_A.discard(user.id)
     else:
         PARTICIPANTS_B.discard(user.id)
-    role_name = POMO_ROLE_A if mode=='A' else POMO_ROLE_B
+
+    # Retirer le rôle
+    role_name = POMO_ROLE_A if mode == 'A' else POMO_ROLE_B
     role = discord.utils.get(ctx.guild.roles, name=role_name)
     if role:
         await user.remove_roles(role)
+
+    # Sauvegarde en DB
     await ajouter_temps(user.id, ctx.guild.id, elapsed, mode=mode, is_session_end=True)
-    m, s = divmod(elapsed, 60)
-    await ctx.send(f"👋 {user.mention} a quitté. +{m} min {s} s ajoutées.")
+
+    await ctx.send(f"👋 {user.mention} a quitté. +{format_duration(elapsed)} ajoutées.")
 
 # ─── Me
 @bot.command(name='me', help='Afficher vos stats personnelles')
@@ -343,7 +365,7 @@ async def me(ctx):
         join_ts, mode = rec
         elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
         ph, _ = get_phase_and_remaining(datetime.now(timezone.utc), mode)
-        status = f"En mode **{mode}** ({ph}) depuis {elapsed//60} min {elapsed%60} s"
+        status = f"En mode **{mode}** ({ph}) depuis {format_duration(elapsed)}"
     else:
         status = "Pas en session actuellement"
 
@@ -366,12 +388,12 @@ async def me(ctx):
     # Embed
     embed = discord.Embed(title=f"📋 Stats de {user.name}", color=messages.MsgColors.AQUA.value)
     embed.add_field(name="Session en cours", value=status, inline=False)
-    embed.add_field(name="Temps total", value=f"{total_s//60} min {total_s%60} s", inline=False)
-    embed.add_field(name="Mode A travail/pause", value=f"{wA//60}/{bA//60} min", inline=True)
-    embed.add_field(name="Mode B travail/pause", value=f"{wB//60}/{bB//60} min", inline=True)
+    embed.add_field(name="Temps total", value=format_duration(total_s), inline=False)
+    embed.add_field(name="Mode A travail/pause", value=f"{format_duration(wA)} / {format_duration(bA)}", inline=True)
+    embed.add_field(name="Mode B travail/pause", value=f"{format_duration(wB)} / {format_duration(bB)}", inline=True)
     embed.add_field(name="Nombre de sessions", value=str(scount), inline=True)
-    avg = (total_s / scount) if scount else 0
-    embed.add_field(name="Moyenne/session", value=f"{int(avg)//60} min {int(avg)%60} s", inline=True)
+    avg = int(total_s / scount) if scount else 0
+    embed.add_field(name="Moyenne/session", value=format_duration(avg), inline=True)
     embed.add_field(name="🔥 Streak actuel", value=f"{cs} jours", inline=True)
     embed.add_field(name="🏅 Meilleur streak", value=f"{bs} jours", inline=True)
     await ctx.send(embed=embed)
@@ -386,15 +408,18 @@ async def stats(ctx):
     data    = await get_all_stats(guild_id)
     unique  = len(data)
     total_s = sum(r[2] for r in data)
-    avg     = (total_s/unique) if unique else 0
+    avg     = int(total_s / unique) if unique else 0
+
     daily = await get_daily_totals(guild_id, days=7)
-    daily_str = "\n".join(f"{day}: {secs//60} m" for day, secs in daily) or "aucune donnée"
+    daily_str = "\n".join(f"{day}: {format_duration(secs)}" for day, secs in daily) or "aucune donnée"
+
     weekly = await get_weekly_sessions(guild_id, weeks=4)
     weekly_str = "\n".join(f"{yw}: {count}" for yw, count in weekly) or "aucune donnée"
+
     e = discord.Embed(title=messages.STATS["title"], color=messages.STATS["color"])
     e.add_field(name="Utilisateurs uniques", value=str(unique), inline=False)
-    e.add_field(name="Temps total (min)", value=f"{total_s/60:.1f}", inline=False)
-    e.add_field(name="Moyenne/utilisateur (min)", value=f"{avg/60:.1f}", inline=False)
+    e.add_field(name="Temps total", value=format_duration(total_s), inline=False)
+    e.add_field(name="Moyenne/utilisateur", value=format_duration(avg), inline=False)
     e.add_field(name="📅 Totaux 7 jours", value=daily_str, inline=False)
     e.add_field(name="🗓 Sessions / semaine", value=weekly_str, inline=False)
     await ctx.send(embed=e)
@@ -437,9 +462,8 @@ async def leaderboard(ctx):
             lines = []
             for i, (uid, val) in enumerate(entries, start=1):
                 user = await bot.fetch_user(uid)
-                if isinstance(val, float):
-                    m, s = divmod(int(val), 60)
-                    label = f"{m}m{s}s"
+                if isinstance(val, (int, float)) and val > 0:
+                    label = format_duration(int(val))
                 else:
                     label = str(val)
                 lines.append(f"{i}. {user.name} — {label}")
@@ -467,19 +491,24 @@ async def status(ctx):
     except ZoneInfoNotFoundError:
         local = now_utc.astimezone()
     local_str = local.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Phases restantes
     phA, rA = get_phase_and_remaining(now_utc, 'A')
     phB, rB = get_phase_and_remaining(now_utc, 'B')
-    mA, sA = divmod(rA, 60)
-    mB, sB = divmod(rB, 60)
+
     countA = len(PARTICIPANTS_A)
     countB = len(PARTICIPANTS_B)
+
     chan = bot.get_channel(POMODORO_CHANNEL_ID)
     chan_field  = f"✅ {chan.mention}" if chan else "❌ non configuré"
+
     guild       = ctx.guild
     roleA       = discord.utils.get(guild.roles, name=POMO_ROLE_A)
     roleB       = discord.utils.get(guild.roles, name=POMO_ROLE_B)
     roleA_field = f"✅ {roleA.mention}" if roleA else "❌ non configuré"
     roleB_field = f"✅ {roleB.mention}" if roleB else "❌ non configuré"
+
+    # Git SHA
     proc = await asyncio.create_subprocess_shell(
         "git rev-parse --short HEAD",
         stdout=asyncio.subprocess.PIPE,
@@ -487,16 +516,19 @@ async def status(ctx):
     )
     out, _ = await proc.communicate()
     sha = out.decode().strip() if out else "unknown"
+
+    # Version fichier
     try:
         with open("VERSION", encoding="utf-8") as f:
             file_ver = f.read().strip()
     except FileNotFoundError:
         file_ver = "unknown"
+
     e = discord.Embed(title=messages.STATUS["title"], color=messages.STATUS["color"])
     e.add_field(name="Latence", value=f"{latency} ms", inline=True)
     e.add_field(name="Heure (Lausanne)", value=local_str, inline=True)
-    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {mA}m{sA}s", inline=False)
-    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {mB}m{sB}s", inline=False)
+    e.add_field(name="Mode A", value=f"{countA} en **{phA}** pour {format_duration(rA)}", inline=False)
+    e.add_field(name="Mode B", value=f"{countB} en **{phB}** pour {format_duration(rB)}", inline=False)
     e.add_field(name="Canal Pomodoro", value=chan_field, inline=False)
     e.add_field(name="Rôle A", value=roleA_field, inline=False)
     e.add_field(name="Rôle B", value=roleB_field, inline=False)
@@ -505,43 +537,58 @@ async def status(ctx):
     await ctx.send(embed=e)
 
 # ─── COMMANDES ADMIN ──────────────────────────────────────────────────────────
-@bot.command(name="maintenance", help="Activer/désactiver le mode maintenance")
+# ─── Maintenance
+@bot.command(name="maintenance", help="Activer ou désactiver le mode maintenance")
 @is_admin()
 async def maintenance(ctx):
     guild_id = ctx.guild.id
+    enabled = not await get_maintenance(guild_id)
+    await set_maintenance(guild_id, enabled)
 
-    # Lire l’état actuel
-    enabled = await get_setting(guild_id, "maintenance_enabled", "0")
-    enabled = bool(int(enabled))
+    if enabled:
+        # Sauvegarder et retirer les participants
+        now_ts = datetime.now(timezone.utc).timestamp()
+        async with aiosqlite.connect(DB_PATH) as db:
+            cur = await db.execute(
+                "SELECT user_id, join_ts, mode FROM participants WHERE guild_id=?",
+                (guild_id,)
+            )
+            rows = await cur.fetchall()
 
-    # Inverser l’état
-    new_state = not enabled
-    await set_setting(guild_id, "maintenance_enabled", "1" if new_state else "0")
+        for user_id, join_ts, mode in rows:
+            elapsed = int(now_ts - join_ts)
+            await ajouter_temps(user_id, guild_id, elapsed, mode=mode, is_session_end=True)
 
-    if new_state:
-        await ctx.send("🔧 Mode maintenance **activé**. Toutes les sessions vont être arrêtées.")
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM participants WHERE guild_id=?", (guild_id,))
+            await db.commit()
 
-        # Éjecter les participants et log leur temps
-        for uid, mode in await get_all_participants(guild_id):
-            join_ts, mode = await remove_participant(uid, guild_id)
-            if join_ts:
-                elapsed = int(datetime.now(timezone.utc).timestamp() - join_ts)
-                await ajouter_temps(uid, guild_id, elapsed, mode=mode, is_session_end=True)
+        # Retirer les rôles Pomodoro
+        roleA = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_A)
+        roleB = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_B)
+        for member in ctx.guild.members:
+            if roleA in member.roles:
+                await member.remove_roles(roleA)
+            if roleB in member.roles:
+                await member.remove_roles(roleB)
 
-            # Retirer le rôle associé
-            member = ctx.guild.get_member(uid)
-            if member:
-                role_name = POMO_ROLE_A if mode == "A" else POMO_ROLE_B
-                role = discord.utils.get(ctx.guild.roles, name=role_name)
-                if role:
-                    await member.remove_roles(role)
+        PARTICIPANTS_A.clear()
+        PARTICIPANTS_B.clear()
 
+        if pomodoro_loop.is_running():
+            pomodoro_loop.stop()
+
+        await ctx.send("🚧 Mode maintenance activé. Toutes les sessions ont été arrêtées.")
     else:
-        await ctx.send("✅ Mode maintenance **désactivé**. Le bot est disponible.")
-        # Prévenir dans le salon Pomodoro
+        if not pomodoro_loop.is_running():
+            pomodoro_loop.start()
+
+        # Message de retour
         chan = bot.get_channel(POMODORO_CHANNEL_ID)
         if chan:
-            await chan.send("✅ La maintenance est terminée, vous pouvez de nouveau utiliser le bot.")
+            await chan.send("✅ Maintenance terminée, le bot est de retour ! 🎉")
+
+        await ctx.send("✅ Maintenance terminée.")
 
 # ─── Set Channel 
 @bot.command(name="defs", help="Définir le salon Pomodoro")
@@ -644,14 +691,12 @@ async def clear_stats(ctx):
     await ctx.send(embed=e)
 
 # ─── Update 
-# ─── Update
 @bot.command(name="update", help="Mettre à jour et redémarrer le bot")
 @is_admin()
 async def update(ctx):
     guild_id = ctx.guild.id
     now_ts = datetime.now(timezone.utc).timestamp()
 
-    # Sauvegarder les temps + retirer rôles
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             "SELECT user_id, join_ts, mode FROM participants WHERE guild_id=?",
@@ -663,30 +708,27 @@ async def update(ctx):
         elapsed = int(now_ts - join_ts)
         await ajouter_temps(user_id, guild_id, elapsed, mode=mode, is_session_end=True)
 
-        # Retirer des sets en mémoire
-        if mode == "A":
-            PARTICIPANTS_A.discard(user_id)
-            role_name = POMO_ROLE_A
-        else:
-            PARTICIPANTS_B.discard(user_id)
-            role_name = POMO_ROLE_B
-
-        # Retirer le rôle discord
-        member = ctx.guild.get_member(user_id)
-        if member:
-            role = discord.utils.get(ctx.guild.roles, name=role_name)
-            if role:
-                await member.remove_roles(role)
-
-    # Supprimer tous les participants en DB
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM participants WHERE guild_id=?", (guild_id,))
         await db.commit()
 
-    # Confirmation côté Discord
+    roleA = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_A)
+    roleB = discord.utils.get(ctx.guild.roles, name=POMO_ROLE_B)
+    for member in ctx.guild.members:
+        if roleA in member.roles:
+            await member.remove_roles(roleA)
+        if roleB in member.roles:
+            await member.remove_roles(roleB)
+
+    PARTICIPANTS_A.clear()
+    PARTICIPANTS_B.clear()
+
     await ctx.send("♻️ Mise à jour lancée, le bot va redémarrer...")
 
-    # Lancer ton script système (déploiement + restart via systemd)
+    # On crée un flag pour que on_ready poste un message de retour
+    with open(".rebooting", "w") as f:
+        f.write(str(guild_id))
+
     os.system("deploy-lre")
     sys.exit(0)
 
