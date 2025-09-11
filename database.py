@@ -14,7 +14,7 @@ DB_PATH = Path(DATA_DIR) / 'pomobot.db'
 # ─── INITIALISATION & MIGRATION ────────────────────────────────────────────────
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
-        # Table participants
+        # Table participants (qui est actuellement en session)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS participants (
             guild_id INTEGER,
@@ -22,9 +22,10 @@ async def init_db():
             join_ts  REAL,
             mode     TEXT,
             PRIMARY KEY (guild_id, user_id)
-        )""")
-        
-        # Table streaks
+        )
+        """)
+
+        # Table streaks (chaînes de jours consécutifs)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS streaks (
             guild_id INTEGER,
@@ -36,16 +37,17 @@ async def init_db():
         )
         """)
 
-        # Table stats (avec colonnes étendues)
+        # Table stats (données de révision + colonnes étendues)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS stats (
             guild_id  INTEGER,
             user_id   INTEGER,
             seconds   INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, user_id)
-        )""")
+        )
+        """)
 
-        # Migration colonnes
+        # Migration colonnes pour stats (ajout si manquant)
         cursor = await db.execute("PRAGMA table_info(stats)")
         cols = [r[1] for r in await cursor.fetchall()]
         migrations = {
@@ -60,7 +62,7 @@ async def init_db():
             if col not in cols:
                 await db.execute(f"ALTER TABLE stats ADD COLUMN {col} {definition}")
 
-        # Table logs de sessions
+        # Table logs de sessions (historique détaillé)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS session_logs (
             guild_id   INTEGER,
@@ -69,7 +71,17 @@ async def init_db():
             mode       TEXT,
             duration   INTEGER,
             PRIMARY KEY (guild_id, user_id, timestamp, mode)
-        )""")
+        )
+        """)
+
+        # Table settings (configuration serveur : maintenance, etc.)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS settings (
+            guild_id INTEGER PRIMARY KEY,
+            maintenance_enabled INTEGER DEFAULT 0
+        )
+        """)
+
         await db.commit()
 
 # ─── AJOUT / MISE À JOUR TEMPS ─────────────────────────────────────────────────
@@ -278,3 +290,30 @@ async def top_streaks(guild_id: int, limit: int = 5):
             LIMIT ?
         """, (guild_id, limit))
         return await cur.fetchall()
+
+# ─── PARAMÈTRES GLOBAUX ─────────────────────────────────────────────────────────
+async def init_settings():
+    """Créer la table settings si elle n'existe pas."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                guild_id INTEGER PRIMARY KEY,
+                maintenance_enabled INTEGER DEFAULT 0
+            )
+        """)
+        await db.commit()
+
+async def get_maintenance(guild_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT maintenance_enabled FROM settings WHERE guild_id=?", (guild_id,))
+        row = await cur.fetchone()
+        return bool(row[0]) if row else False
+
+async def set_maintenance(guild_id: int, enabled: bool):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO settings(guild_id, maintenance_enabled)
+            VALUES(?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET maintenance_enabled=excluded.maintenance_enabled
+        """, (guild_id, int(enabled)))
+        await db.commit()
